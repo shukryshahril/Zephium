@@ -46,6 +46,20 @@ Density, text size, and contrast previews update the rendered interface for
 the current session. Actual backend preference support can be added later
 without treating preview values as persisted state.
 
+## Profile shortcuts
+
+Keyboard & accessibility includes a Profiles section for rebinding Next profile
+and Previous profile. The defaults are Ctrl+Cmd+P and Ctrl+Cmd+Shift+P on macOS,
+and F9 and Shift+F9 on Windows. Both commands cycle through the persistent
+profile roster and wrap around; a single profile leaves the selection unchanged.
+From a private window, cycling starts from its regular profile and leaves private
+browsing when switching to another profile. Repeated steps while Settings returns
+to Browse accumulate from the queued destination rather than losing a keypress.
+
+![Profile shortcuts in Keyboard & accessibility](../../.github/assets/profile-shortcuts.png)
+
+Keyboard page rendered in a WebKit component test with mocked native bindings.
+
 ## Verification
 
 The frame check covers types, lint, formatting, and tests. Focused tests cover

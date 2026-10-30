@@ -84,6 +84,8 @@ pub(crate) use work_resource::notify_work_resource;
 
 #[cfg(test)]
 pub(crate) use dispatch::make_unavailable_for_test;
+#[cfg(target_os = "macos")]
+pub(crate) use dispatch::try_perform_extension_command;
 #[cfg(all(
     feature = "agentic-browser",
     any(target_os = "macos", target_os = "windows")

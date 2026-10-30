@@ -459,6 +459,65 @@ impl WebextHost {
         }
     }
 
+    /// Runs the extension command `event` is the shortcut of, in the profile
+    /// of the focused window, as Chrome does before the page sees the key.
+    /// The browser's own menu shortcuts keep precedence. `_execute_action`
+    /// goes through the toolbar so its popup hangs from the button.
+    pub(crate) fn perform_command(&self, event: &objc2_app_kit::NSEvent) -> bool {
+        let Some((profile, entry, surface)) = self.profiles.iter().find_map(|(profile, entry)| {
+            let surface = entry.surface.as_ref().filter(|s| s.focused().is_some())?;
+            Some((*profile, entry, surface))
+        }) else {
+            return false;
+        };
+        let mut found: Option<(ExtensionInstallId, _, _, _)> = None;
+        for (install_id, install) in &entry.installs {
+            if !install.loaded || found.as_ref().is_some_and(|(id, ..)| id < install_id) {
+                continue;
+            }
+            let Some(context) = entry.runtime.context(&install.extension_id) else {
+                continue;
+            };
+            if let Some(command) = unsafe { context.commandForEvent(event) } {
+                found = Some((*install_id, install.generation, context, command));
+            }
+        }
+        let Some((install, generation, context, command)) = found else {
+            return false;
+        };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        if objc2_app_kit::NSApplication::sharedApplication(mtm)
+            .mainMenu()
+            .is_some_and(|menu| menu_claims(&menu, event))
+        {
+            return false;
+        }
+        if event.isARepeat() {
+            return true;
+        }
+        let identifier = unsafe { command.identifier() }.to_string();
+        if matches!(
+            identifier.as_str(),
+            "_execute_action" | "_execute_browser_action" | "_execute_page_action"
+        ) {
+            if let Some(tab) = surface.windows().first().and_then(|w| w.active()) {
+                entry
+                    .bridge
+                    .sink
+                    .emit(EngineEvent::ExtensionActionShortcutRequested {
+                        runtime: ExtensionRuntimeInstance::new(profile, install, generation),
+                        tab,
+                        surface_generation: surface.generation(),
+                    });
+            }
+        } else {
+            unsafe { context.performCommand(&command) };
+        }
+        true
+    }
+
     /// Runs a toolbar action. A popup is presented from WebKit's delegate
     /// callback, anchored to the button the user clicked.
     pub(crate) fn invoke(
@@ -656,6 +715,49 @@ impl WebextHost {
         }
         true
     }
+}
+
+/// Whether a key equivalent in `menu` or its submenus takes `event`.
+fn menu_claims(menu: &objc2_app_kit::NSMenu, event: &objc2_app_kit::NSEvent) -> bool {
+    use objc2_app_kit::NSEventModifierFlags as Flags;
+    let relevant = Flags::Command | Flags::Control | Flags::Option | Flags::Shift;
+    let flags = event.modifierFlags() & relevant;
+    let Some(key) = event
+        .charactersByApplyingModifiers(Flags::empty())
+        .map(|key| key.to_string().to_lowercase())
+    else {
+        return false;
+    };
+    fn walk(menu: &objc2_app_kit::NSMenu, key: &str, flags: Flags) -> bool {
+        menu.itemArray().iter().any(|item| {
+            item.submenu().is_some_and(|sub| walk(&sub, key, flags))
+                || key_equivalent_matches(
+                    &item.keyEquivalent().to_string(),
+                    item.keyEquivalentModifierMask(),
+                    key,
+                    flags,
+                )
+        })
+    }
+    walk(menu, &key, flags)
+}
+
+/// AppKit spells Shift in a key equivalent as an uppercase letter.
+fn key_equivalent_matches(
+    equivalent: &str,
+    mask: objc2_app_kit::NSEventModifierFlags,
+    key: &str,
+    flags: objc2_app_kit::NSEventModifierFlags,
+) -> bool {
+    use objc2_app_kit::NSEventModifierFlags as Flags;
+    if equivalent.is_empty() {
+        return false;
+    }
+    let mut mask = mask & (Flags::Command | Flags::Control | Flags::Option | Flags::Shift);
+    if equivalent.chars().any(char::is_uppercase) {
+        mask |= Flags::Shift;
+    }
+    mask == flags && equivalent.to_lowercase() == key
 }
 
 fn presentation_revision(label: &str, badge: &str, icon: Option<&[u8]>) -> ExtensionActionRevision {
@@ -2059,6 +2161,26 @@ mod tests {
         assert_eq!(results.borrow().len(), 1);
         assert_eq!(registry.pending.len(), 1);
         assert_eq!(registry.pending[0].tab.get(), Some(ItemId::from(200)));
+    }
+
+    #[test]
+    fn a_menu_key_equivalent_claims_exactly_its_keys() {
+        use objc2_app_kit::NSEventModifierFlags as Flags;
+        let cmd = Flags::Command;
+        let cmd_shift = Flags::Command | Flags::Shift;
+        assert!(key_equivalent_matches("t", cmd, "t", cmd));
+        assert!(key_equivalent_matches("T", cmd, "t", cmd_shift));
+        assert!(key_equivalent_matches("t", cmd_shift, "t", cmd_shift));
+        assert!(key_equivalent_matches(
+            "t",
+            cmd | Flags::NumericPad,
+            "t",
+            cmd
+        ));
+        assert!(!key_equivalent_matches("t", cmd, "t", cmd_shift));
+        assert!(!key_equivalent_matches("T", cmd, "t", cmd));
+        assert!(!key_equivalent_matches("y", cmd, "t", cmd));
+        assert!(!key_equivalent_matches("", cmd, "", cmd));
     }
 
     #[test]

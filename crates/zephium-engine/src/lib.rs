@@ -164,6 +164,18 @@ compile_error!("the native agentic semantic probe is forbidden in optimized buil
 
 #[cfg(target_os = "macos")]
 pub use platform::macos::private_api::missing as missing_private_webkit_api;
+
+/// Runs the extension command a key press in the browser window is the
+/// shortcut of; true when one took it. Call it for keys no browser shortcut
+/// claimed, before the page sees them. Unmodified keys return at once.
+#[cfg(target_os = "macos")]
+pub fn perform_extension_command(event: &objc2_app_kit::NSEvent) -> bool {
+    use objc2_app_kit::NSEventModifierFlags as Flags;
+    event
+        .modifierFlags()
+        .intersects(Flags::Command | Flags::Control | Flags::Option)
+        && host::try_perform_extension_command(event)
+}
 #[cfg(target_os = "macos")]
 pub use platform::macos::{
     passkey_authorization_state as macos_passkey_authorization_state,

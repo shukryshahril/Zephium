@@ -239,8 +239,7 @@
   {
     "name": "Hypothesis",
     "id": "bjfhmglciegochdpefhhlphglcehbmek",
-    "popup": false,
-    "known": "tabs.query returns nothing while it starts, so it never attaches to pages"
+    "popup": false
   },
   {
     "name": "JSON Formatter",
@@ -376,8 +375,7 @@
         "wait": 20000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
-    ],
-    "known": "its popup renders nothing"
+    ]
   },
   {
     "name": "Proton Pass",

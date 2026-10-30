@@ -1389,4 +1389,37 @@
     Object.assign(WebSocket.prototype, states);
     g.WebSocket = WebSocket;
   }
+
+  // ---- Detached calls ------------------------------------------------------
+  // Chrome's API functions work apart from their namespace (`const { query }
+  // = chrome.tabs`); WebKit's answer nothing without it. Every method of the
+  // API, nested areas and events included, is bound to its owner.
+  const bound = new WeakSet();
+  const bindAll = (target, depth) => {
+    if (!target || typeof target !== "object" || bound.has(target) || depth > 3) return;
+    bound.add(target);
+    const names = new Set();
+    for (let level = target; level && level !== Object.prototype; level = Object.getPrototypeOf(level)) {
+      for (const name of Object.getOwnPropertyNames(level)) names.add(name);
+    }
+    for (const name of names) {
+      if (name === "constructor" || name === "lastError" || name.startsWith("__zephium")) continue;
+      let value;
+      try {
+        value = target[name];
+      } catch {
+        continue;
+      }
+      if (typeof value === "function") {
+        if (!bound.has(value)) {
+          const method = value.bind(target);
+          bound.add(method);
+          if (pin(target, name, method)) kept.push(target);
+        }
+      } else if (value && typeof value === "object" && !Object.isFrozen(value)) {
+        bindAll(value, depth + 1);
+      }
+    }
+  };
+  bindAll(chromeApi, 0);
 })();

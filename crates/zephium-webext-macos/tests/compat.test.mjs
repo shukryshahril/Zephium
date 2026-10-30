@@ -333,3 +333,11 @@ test("filters and patterns WebKit can't read are narrowed, not refused", async (
   assert.equal(chrome.declarativeNetRequest.RuleActionType.BLOCK, "block");
   assert.equal(chrome.identity.AccountStatus.ANY, "ANY");
 });
+
+test("API methods work apart from their namespace", async () => {
+  const { chrome } = context("page");
+  const { query } = chrome.tabs;
+  const { getURL } = chrome.runtime;
+  assert.equal((await query({ active: true })).length, 1);
+  assert.match(getURL("x"), /\/x$/);
+});

@@ -55,7 +55,9 @@ pub(crate) fn handle(
         );
         return;
     }
-    if message.get("api").and_then(Value::as_str) == Some("offscreen.create") {
+    if message.get("api").and_then(Value::as_str) == Some("offscreen.create")
+        && declares(context, "offscreen")
+    {
         let url = message
             .get("url")
             .and_then(Value::as_str)
@@ -154,6 +156,7 @@ pub(crate) fn handle(
             Ok(Value::Null)
         }
         Some("offscreen.close") => Ok(Value::Bool(offscreen::close(shared, &extension(context)))),
+        Some("runtime.contexts") => Ok(contexts(shared, context)),
         Some("offscreen.has") => Ok(Value::Bool(offscreen::has(shared, &extension(context)))),
         Some("clipboard.write")
             if permitted(context, unsafe { WKWebExtensionPermissionClipboardWrite }) =>
@@ -191,6 +194,58 @@ fn respond(reply: &DynBlock<dyn Fn(*mut AnyObject, *mut NSError)>, result: Resul
             reply.call((std::ptr::null_mut(), Retained::as_ptr(&error).cast_mut()));
         }
     }
+}
+
+/// `runtime.getContexts` from what the browser knows: the background, the
+/// offscreen document and the extension's pages shown in tabs. Popups and
+/// frames inside web pages aren't listed.
+fn contexts(shared: &Rc<Shared>, context: &WKWebExtensionContext) -> Value {
+    let id = extension(context);
+    let origin = format!("{}://{id}", crate::runtime::SCHEME);
+    let entry = |kind: &str, url: Option<String>, tab: i64, window: i64| {
+        serde_json::json!({
+            "contextType": kind,
+            "contextId": format!("{kind}:{}:{tab}", url.as_deref().unwrap_or_default()),
+            "tabId": tab,
+            "windowId": window,
+            "frameId": if tab >= 0 { 0 } else { -1 },
+            "documentUrl": url,
+            "documentOrigin": url.as_ref().map(|_| origin.clone()),
+            "incognito": false,
+        })
+    };
+    let mut found = Vec::new();
+    if unsafe { context.webExtension().hasBackgroundContent() } {
+        let worker = unsafe { context.webExtension().manifest() };
+        let worker = json::from_object(Some(&worker));
+        let script = worker["background"]["service_worker"]
+            .as_str()
+            .map(str::to_owned);
+        found.push(entry(
+            "BACKGROUND",
+            script.map(|s| format!("{origin}/{}", s.trim_start_matches('/'))),
+            -1,
+            -1,
+        ));
+    }
+    if let Some(url) = offscreen::url(shared, &id) {
+        found.push(entry("OFFSCREEN_DOCUMENT", Some(url), -1, -1));
+    }
+    let graph = shared.graph.borrow();
+    for window in &graph.windows {
+        for tab in window.tabs() {
+            let url = tab
+                .webview()
+                .and_then(|view| unsafe { view.URL() })
+                .and_then(|url| url.absoluteString())
+                .map(|url| url.to_string())
+                .filter(|url| url.starts_with(&format!("{origin}/")));
+            if let Some(url) = url {
+                found.push(entry("TAB", Some(url), tab.id() as i64, window.id() as i64));
+            }
+        }
+    }
+    Value::Array(found)
 }
 
 fn extension(context: &WKWebExtensionContext) -> String {

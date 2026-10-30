@@ -787,6 +787,26 @@
     for (const name of ["onUpdateAvailable", "onRestartRequired", "onBrowserUpdateAvailable"]) {
       if (!chromeRuntime[name]) pin(chromeRuntime, name, makeEvent());
     }
+    if (typeof chromeRuntime.getContexts !== "function") {
+      pin(chromeRuntime, "getContexts", (filter, callback) => {
+        const wanted = filter || {};
+        const keep = (list, value) => !Array.isArray(list) || list.includes(value);
+        const found = native("runtime.contexts", {}).then((contexts) =>
+          (contexts || []).filter(
+            (context) =>
+              keep(wanted.contextTypes, context.contextType) &&
+              keep(wanted.contextIds, context.contextId) &&
+              keep(wanted.tabIds, context.tabId) &&
+              keep(wanted.windowIds, context.windowId) &&
+              keep(wanted.frameIds, context.frameId) &&
+              keep(wanted.documentUrls, context.documentUrl) &&
+              keep(wanted.documentOrigins, context.documentOrigin) &&
+              (wanted.incognito === undefined || wanted.incognito === context.incognito),
+          ),
+        );
+        return withCallback(found, callback);
+      });
+    }
     if (typeof chromeRuntime.requestUpdateCheck !== "function") {
       pin(chromeRuntime, "requestUpdateCheck", (callback) => withCallback(Promise.resolve({ status: "no_update" }), callback));
     }
@@ -1047,7 +1067,7 @@
   }
 
   // ---- Offscreen documents and the clipboard -------------------------------
-  if (!isContent && !chromeApi.offscreen) {
+  if (!isContent && !chromeApi.offscreen && declares("offscreen")) {
     const reasons = [
       "TESTING", "AUDIO_PLAYBACK", "IFRAME_SCRIPTING", "DOM_SCRAPING", "BLOBS", "DOM_PARSER", "USER_MEDIA",
       "DISPLAY_MEDIA", "WEB_RTC", "CLIPBOARD", "LOCAL_STORAGE", "WORKERS", "BATTERY_STATUS", "MATCH_MEDIA",

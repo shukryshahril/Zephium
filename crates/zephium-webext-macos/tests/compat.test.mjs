@@ -70,7 +70,7 @@ function context(kind) {
       getManifest: () => ({
         name: "__MSG_name__",
         version: "1.2",
-        permissions: ["tabs", "https://a.test/*", "privacy", "notifications"],
+        permissions: ["tabs", "https://a.test/*", "privacy", "notifications", "offscreen"],
         optional_permissions: ["idle"],
         options_page: "options.html",
       }),
@@ -228,7 +228,7 @@ test("pages and workers get every API fix", async () => {
     const self = await chrome.management.getSelf();
     assert.equal(self.name, "Probe", kind);
     assert.equal(self.installType, "normal", kind);
-    assert.equal(JSON.stringify(self.permissions), JSON.stringify(["tabs", "privacy", "notifications"]), kind);
+    assert.equal(JSON.stringify(self.permissions), JSON.stringify(["tabs", "privacy", "notifications", "offscreen"]), kind);
     assert.equal(self.optionsUrl, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html", kind);
   }
 });

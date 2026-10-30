@@ -17,6 +17,7 @@ mod idle;
 mod json;
 mod lifetime;
 mod native;
+mod notifications;
 mod offscreen;
 mod privacy;
 mod runtime;

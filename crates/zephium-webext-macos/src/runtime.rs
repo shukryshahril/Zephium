@@ -760,6 +760,7 @@ fn unload(shared: &Rc<Shared>, controller: &WKWebExtensionController, id: &str) 
     crate::events::forget(shared, id);
     crate::idle::forget(shared, id);
     crate::privacy::forget(shared, id);
+    crate::notifications::forget(shared, id);
     crate::cookies::refresh(shared);
     unsafe { controller.unloadExtensionContext_error(&loaded.context) }.is_ok()
 }

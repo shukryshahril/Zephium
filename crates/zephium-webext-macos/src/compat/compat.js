@@ -364,7 +364,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["idle", "privacy"]);
+  const BROWSER_PERMISSIONS = new Set(["idle", "notifications", "privacy"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -657,38 +657,36 @@
     }
   }
 
-  if (!isContent && !chromeApi.notifications) {
-    const event = makeEvent;
+  // Notifications go to the Mac's notification center; clicks, buttons and
+  // dismissals come back as events.
+  if (hub && declares("notifications")) {
+    const target = chromeApi.notifications || {};
     let created = 0;
-    pin(chromeApi, "notifications", {
-      TemplateType: Object.freeze({ BASIC: "basic", IMAGE: "image", LIST: "list", PROGRESS: "progress" }),
-      PermissionLevel: Object.freeze({ GRANTED: "granted", DENIED: "denied" }),
-      create(id, options, callback) {
-        if (typeof id === "object" && id !== null) {
-          callback = options;
-          options = id;
-          id = undefined;
-        }
-        const name = typeof id === "string" && id ? id : `zephium-${++created}`;
-        const shown = native("notify", {
-          id: name,
-          title: String((options && options.title) || ""),
-          message: String((options && options.message) || ""),
-        })
-          .catch(() => {})
-          .then(() => name);
-        return withCallback(shown, callback);
-      },
-      update: (_id, _options, callback) => withCallback(Promise.resolve(false), callback),
-      clear: (_id, callback) => withCallback(Promise.resolve(true), callback),
-      getAll: (callback) => withCallback(Promise.resolve({}), callback),
-      getPermissionLevel: (callback) => withCallback(Promise.resolve("granted"), callback),
-      onClicked: event(),
-      onClosed: event(),
-      onButtonClicked: event(),
-      onPermissionLevelChanged: event(),
-      onShowSettings: event(),
-    });
+    const listen = (name) => {
+      const ours = hub.event(`notifications.${name}`);
+      if (target[name] && typeof target[name].addListener === "function") adopt(target[name], ours);
+      else pin(target, name, ours);
+    };
+    const show = (id, options, callback) => {
+      if (typeof id === "object" && id !== null) [id, options, callback] = [undefined, id, options];
+      const name = typeof id === "string" && id ? id : `zephium-${Date.now()}-${++created}`;
+      return withCallback(native("notifications.create", { id: name, options: options || {} }), callback);
+    };
+    pin(target, "TemplateType", Object.freeze({ BASIC: "basic", IMAGE: "image", LIST: "list", PROGRESS: "progress" }));
+    pin(target, "PermissionLevel", Object.freeze({ GRANTED: "granted", DENIED: "denied" }));
+    pin(target, "create", show);
+    pin(target, "update", (id, options, callback) =>
+      withCallback(
+        native("notifications.getAll", {}).then((all) => (all && all[id] ? show(id, options).then(() => true) : false)),
+        callback,
+      ),
+    );
+    pin(target, "clear", (id, callback) => withCallback(native("notifications.clear", { id: String(id) }), callback));
+    pin(target, "getAll", (callback) => withCallback(native("notifications.getAll", {}), callback));
+    pin(target, "getPermissionLevel", (callback) => withCallback(native("notifications.permission", {}), callback));
+    for (const name of ["onClicked", "onClosed", "onButtonClicked"]) listen(name);
+    for (const name of ["onPermissionLevelChanged", "onShowSettings"]) if (!target[name]) pin(target, name, makeEvent());
+    if (!chromeApi.notifications) pin(chromeApi, "notifications", target);
   }
 
   // Constants Chrome always defines. Extensions read them at startup, before

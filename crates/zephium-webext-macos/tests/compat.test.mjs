@@ -36,6 +36,8 @@ function context(kind) {
           case "privacy.set":
             this.settings[message.setting] = message.value;
             return null;
+          case "notifications.create":
+            return message.id;
           case "idle.query":
             return message.interval >= 15 ? "active" : "invalid";
           default:
@@ -68,7 +70,7 @@ function context(kind) {
       getManifest: () => ({
         name: "__MSG_name__",
         version: "1.2",
-        permissions: ["tabs", "https://a.test/*", "privacy"],
+        permissions: ["tabs", "https://a.test/*", "privacy", "notifications"],
         optional_permissions: ["idle"],
         options_page: "options.html",
       }),
@@ -183,6 +185,8 @@ test("pages and workers get every API fix", async () => {
     await chrome.scripting.registerContentScripts([{ id: "a" }]);
     assert.equal(typeof chrome.webNavigation.onHistoryStateUpdated.addListener, "function", kind);
     assert.equal(typeof chrome.notifications.create, "function", kind);
+    assert.equal(await chrome.notifications.create("n1", { title: "t", message: "m" }), "n1", kind);
+    assert.match(await chrome.notifications.create({ title: "t", message: "m" }), /^zephium-/, kind);
     assert.match(chrome.identity.getRedirectURL("cb"), /^https:\/\/abcdefghijklmnopabcdefghijklmnop\.chromiumapp\.org\/cb$/);
     const saving = await chrome.privacy.services.passwordSavingEnabled.get({});
     assert.equal(saving.value, true, kind);
@@ -224,7 +228,7 @@ test("pages and workers get every API fix", async () => {
     const self = await chrome.management.getSelf();
     assert.equal(self.name, "Probe", kind);
     assert.equal(self.installType, "normal", kind);
-    assert.equal(JSON.stringify(self.permissions), JSON.stringify(["tabs", "privacy"]), kind);
+    assert.equal(JSON.stringify(self.permissions), JSON.stringify(["tabs", "privacy", "notifications"]), kind);
     assert.equal(self.optionsUrl, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html", kind);
   }
 });

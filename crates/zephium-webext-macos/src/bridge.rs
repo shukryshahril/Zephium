@@ -14,7 +14,7 @@ use objc2_web_kit::{
 use serde_json::Value;
 
 use crate::runtime::Shared;
-use crate::{api, error, idle, json, offscreen, privacy, LogLevel};
+use crate::{api, error, idle, json, notifications, offscreen, privacy, LogLevel};
 
 pub(crate) const APPLICATION: &str = "app.zephium.webext";
 
@@ -107,6 +107,23 @@ pub(crate) fn handle(
             idle::watch(shared, &id, interval);
             Value::Null
         }),
+        Some("notifications.create") => gate("notifications").and_then(|()| {
+            let name = unsafe { context.webExtension().displayName() }
+                .map(|name| name.to_string())
+                .unwrap_or_default();
+            notifications::create(shared, &id, &name, &message)
+        }),
+        Some("notifications.clear") => gate("notifications").map(|()| {
+            let target = message
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            Value::Bool(notifications::clear(shared, &id, target))
+        }),
+        Some("notifications.getAll") => {
+            gate("notifications").map(|()| notifications::all(shared, &id))
+        }
+        Some("notifications.permission") => Ok(Value::from(notifications::permission())),
         Some("privacy.get") => gate("privacy").and_then(|()| privacy::get(shared, &id, &message)),
         Some("privacy.set") => gate("privacy").and_then(|()| privacy::set(shared, &id, &message)),
         Some("privacy.clear") => {
@@ -156,14 +173,6 @@ pub(crate) fn handle(
                 .stringForType(unsafe { NSPasteboardTypeString })
                 .map(|text| text.to_string());
             Ok(text.map_or(Value::Null, Value::String))
-        }
-        Some("notify") => {
-            let title = message
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            shared.log(context, LogLevel::Info, &format!("notification: {title}"));
-            Ok(Value::Null)
         }
         Some(api) => Err(format!("{api} is not supported")),
         None => Err("missing api".to_owned()),

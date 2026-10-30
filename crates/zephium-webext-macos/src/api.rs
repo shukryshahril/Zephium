@@ -12,7 +12,7 @@ use crate::runtime::{Grants, Shared};
 use crate::{events, json};
 
 /// Kept in sync with `BROWSER_PERMISSIONS` in the compatibility layer.
-pub const BROWSER_PERMISSIONS: &[&str] = &["idle", "privacy"];
+pub const BROWSER_PERMISSIONS: &[&str] = &["idle", "notifications", "privacy"];
 
 pub(crate) fn is_browser_permission(name: &str) -> bool {
     BROWSER_PERMISSIONS.contains(&name)

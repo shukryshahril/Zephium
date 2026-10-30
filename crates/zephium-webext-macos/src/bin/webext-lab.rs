@@ -13,7 +13,7 @@
 //!   "as": "<label>"}` prints `RESULT <label> <value>` when labelled
 //! - `{"keys": "<text>", "in": "tab" | "page"}` types real key presses
 //! - `{"sleep": <ms>}`; `{"mark": "<name>"}` prints `MARK <name>`
-//! - `{"close": "tab" | "popup"}` closes the active tab or the popup
+//! - `{"close": "tabs" | "popup"}` closes every tab but the first, or the popup
 //! - `{"auth": "<url>"}` offers a sign-in challenge for `url` to extensions
 //! - `{"unload": true}` unloads the last loaded extension; `{"erase": true}`
 //!   unloads it and erases its stored data
@@ -445,15 +445,15 @@ impl Lab {
                     }
                 }
                 _ => {
-                    let active = this.active.get();
+                    let first = this.tabs.borrow().first().map_or(0, |(id, _)| *id);
                     this.tabs.borrow_mut().retain(|(id, view)| {
-                        if *id == active {
+                        if *id != first {
+                            load(view, "about:blank");
                             view.removeFromSuperview();
                         }
-                        *id != active
+                        *id == first
                     });
-                    let last = this.tabs.borrow().last().map_or(0, |(id, _)| *id);
-                    this.active.set(last);
+                    this.active.set(first);
                     this.publish();
                 }
             }

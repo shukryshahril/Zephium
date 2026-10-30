@@ -424,15 +424,16 @@ fn steps(entry: &Expectation, crx: &Path, origin: &str) -> Vec<serde_json::Value
             "as": format!("check{index}")
         }));
         steps.push(serde_json::json!({ "sleep": check.settle }));
-        steps.push(serde_json::json!({ "close": "tab" }));
+        steps.push(serde_json::json!({ "close": "tabs" }));
     }
     steps.extend(idle_steps());
     steps
 }
 
 /// The extension rests, with one idle page open, while its helpers are sampled.
-fn idle_steps() -> [serde_json::Value; 4] {
+fn idle_steps() -> [serde_json::Value; 5] {
     [
+        serde_json::json!({ "close": "tabs" }),
         serde_json::json!({ "mark": "idle-start" }),
         serde_json::json!({ "sleep": IDLE.as_millis() as u64 }),
         serde_json::json!({ "mark": "idle-end" }),

@@ -1183,6 +1183,19 @@
 
   // Every enabled extension's action is shown in Zephium's toolbar.
   const action = !isContent && namespace("action");
+  // Zephium draws badges in its own toolbar colors; the text color an
+  // extension picks is kept and answered back.
+  if (action && typeof action.setBadgeTextColor !== "function") {
+    const colors = new Map();
+    pin(action, "setBadgeTextColor", (details, callback) => {
+      colors.set((details && details.tabId) ?? null, details && details.color);
+      return withCallback(Promise.resolve(), callback);
+    });
+    pin(action, "getBadgeTextColor", (details, callback) => {
+      const color = colors.get((details && details.tabId) ?? null) ?? colors.get(null) ?? [255, 255, 255, 255];
+      return withCallback(Promise.resolve(Array.isArray(color) ? color : [255, 255, 255, 255]), callback);
+    });
+  }
   if (action && typeof action.getUserSettings !== "function") {
     pin(action, "getUserSettings", (callback) => withCallback(Promise.resolve({ isOnToolbar: true }), callback));
     if (!action.onUserSettingsChanged) pin(action, "onUserSettingsChanged", makeEvent());

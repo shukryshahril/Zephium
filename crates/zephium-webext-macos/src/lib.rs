@@ -8,6 +8,7 @@
 
 mod access;
 mod api;
+mod auth;
 mod bridge;
 pub mod compat;
 mod cookies;
@@ -30,6 +31,7 @@ use objc2::rc::Retained;
 use objc2_foundation::{NSError, NSLocalizedDescriptionKey, NSMutableDictionary, NSString};
 
 pub use api::BROWSER_PERMISSIONS;
+pub use auth::{AuthAnswer, AuthDetails};
 pub use runtime::{ExtensionSpec, Grants, LoadedExtension, Runtime};
 
 /// A readable message for any error WebKit reports.

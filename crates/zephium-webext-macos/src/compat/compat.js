@@ -349,9 +349,12 @@
     const add = event.addListener;
     const remove = event.removeListener;
     const has = event.hasListener;
-    pin(event, "addListener", function (listener) {
-      if (alongside) add.call(this, listener);
-      ours.addListener(listener);
+    pin(event, "__zephiumAdd", (...args) => add.apply(event, args));
+    pin(event, "__zephiumRemove", (listener) => remove.call(event, listener));
+    pin(event, "__zephiumHas", (listener) => has.call(event, listener));
+    pin(event, "addListener", function (listener, ...rest) {
+      if (alongside) add.call(this, listener, ...rest);
+      ours.addListener(listener, ...rest);
     });
     pin(event, "removeListener", function (listener) {
       if (alongside) remove.call(this, listener);
@@ -364,7 +367,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["idle", "notifications", "privacy"]);
+  const BROWSER_PERMISSIONS = new Set(["idle", "notifications", "privacy", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -462,6 +465,78 @@
     pin(cookies, "OnChangedCause", Object.freeze({
       EVICTED: "evicted", EXPIRED: "expired", EXPLICIT: "explicit", EXPIRED_OVERWRITE: "expired_overwrite", OVERWRITE: "overwrite",
     }));
+  }
+
+  // Sign-in challenges reach listeners that may answer them (blocking or
+  // asyncBlocking with webRequestAuthProvider) through the browser, which
+  // asks the person only when none answered. Others keep WebKit's observing
+  // event.
+  const authEvent = hub && declares("webRequestAuthProvider") && chromeApi.webRequest && chromeApi.webRequest.onAuthRequired;
+  if (authEvent && typeof authEvent.addListener === "function") {
+    const answering = new Map();
+    const covers = (pattern, url) => {
+      if (pattern === "<all_urls>") return /^(https?|wss?|ftp):/.test(url);
+      const match = /^(\*|https?|wss?|ftp):\/\/(\*|\*\.[^/*]+|[^/*]+)(\/.*)$/.exec(pattern);
+      if (!match) return false;
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return false;
+      }
+      const [, scheme, host, path] = match;
+      const protocol = parsed.protocol.slice(0, -1);
+      if (scheme === "*" ? !/^(https?|wss?)$/.test(protocol) : scheme !== protocol) return false;
+      const name = host.includes(":") ? parsed.host : parsed.hostname;
+      if (host !== "*" && !(host.startsWith("*.") ? name === host.slice(2) || name.endsWith(host.slice(1)) : name === host)) return false;
+      const escaped = path.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      return new RegExp(`^${escaped}$`).test(parsed.pathname + parsed.search);
+    };
+    const dispatch = hub.event("webRequest.onAuthRequired");
+    dispatch.addListener((details, reply) => {
+      const chosen = [...answering].filter(([, filter]) =>
+        (filter.urls || []).some((pattern) => covers(pattern, details.url)) &&
+        (!filter.tabId || filter.tabId === details.tabId),
+      );
+      if (chosen.length === 0) return reply(null);
+      let waiting = chosen.length;
+      let settled = false;
+      const settle = (answer) => {
+        if (settled) return;
+        if (answer && (answer.cancel || answer.authCredentials)) {
+          settled = true;
+          return reply(answer);
+        }
+        if (--waiting === 0) {
+          settled = true;
+          reply(null);
+        }
+      };
+      for (const [[listener, callsBack]] of chosen) {
+        try {
+          const result = callsBack ? listener(details, settle) : listener(details);
+          if (!callsBack) settle(result);
+        } catch (error) {
+          settle(null);
+          setTimeout(() => {
+            throw error;
+          });
+        }
+      }
+    });
+    adopt(authEvent, {
+      addListener(listener, filter, spec) {
+        const blocking = Array.isArray(spec) && (spec.includes("blocking") || spec.includes("asyncBlocking"));
+        if (!blocking) return authEvent.__zephiumAdd(listener, filter, spec);
+        answering.set([listener, spec.includes("asyncBlocking")], filter || {});
+      },
+      removeListener(listener) {
+        for (const key of answering.keys()) if (key[0] === listener) answering.delete(key);
+        authEvent.__zephiumRemove(listener);
+      },
+      hasListener: (listener) => [...answering.keys()].some((key) => key[0] === listener) || authEvent.__zephiumHas(listener),
+      hasListeners: () => answering.size > 0,
+    });
   }
 
   // Locks a vault or pauses work while the person is away from the Mac.

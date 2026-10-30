@@ -375,6 +375,20 @@ impl WebextHost {
         entry.surface = Some(surface.clone());
     }
 
+    /// Offers a site's sign-in challenge to the profile's extensions; `done`
+    /// gets their answer, or `None` when the person should be asked.
+    pub(crate) fn auth_required(
+        &self,
+        profile: ProfileId,
+        details: zephium_webext_macos::AuthDetails,
+        done: Box<dyn FnOnce(Option<zephium_webext_macos::AuthAnswer>)>,
+    ) {
+        match self.profiles.get(&profile) {
+            Some(entry) => entry.runtime.auth_required(details, done),
+            None => done(None),
+        }
+    }
+
     pub(crate) fn bind_view(&mut self, profile: ProfileId, tab: ItemId, view: Option<&WKWebView>) {
         if view.is_none() {
             settle_auth_flows(

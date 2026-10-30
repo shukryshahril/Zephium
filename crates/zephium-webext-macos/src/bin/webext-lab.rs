@@ -12,6 +12,7 @@
 //! - `{"eval": "<async function body>", "in": "page" | "tab", "timeout": 5000}`
 //! - `{"keys": "<text>", "in": "tab" | "page"}` types real key presses
 //! - `{"sleep": <ms>}`
+//! - `{"auth": "<url>"}` offers a sign-in challenge for `url` to extensions
 //! - `{"unload": true}` unloads the last loaded extension; `{"erase": true}`
 //!   unloads it and erases its stored data
 //!
@@ -312,6 +313,30 @@ impl Lab {
             let id = this.extension.borrow().clone().unwrap_or_default();
             this.runtime.start_background(&id, move |result| {
                 println!("BACKGROUND {result:?}");
+                next();
+            });
+        } else if let Some(url) = step.get("auth").and_then(Value::as_str) {
+            let host = url
+                .split("://")
+                .nth(1)
+                .and_then(|rest| rest.split('/').next());
+            let details = zephium_webext_macos::AuthDetails {
+                request_id: "lab-1".into(),
+                url: url.into(),
+                scheme: "basic".into(),
+                host: host.unwrap_or_default().into(),
+                port: 443,
+                proxy: false,
+                tab: Some(this.active.get()),
+            };
+            this.runtime.auth_required(details, move |answer| {
+                match answer {
+                    Some(zephium_webext_macos::AuthAnswer::Credentials { username, .. }) => {
+                        println!("AUTH credentials for {username}")
+                    }
+                    Some(zephium_webext_macos::AuthAnswer::Cancel) => println!("AUTH cancel"),
+                    None => println!("AUTH none"),
+                }
                 next();
             });
         } else if let Some(url) = step.get("tab").and_then(Value::as_str) {

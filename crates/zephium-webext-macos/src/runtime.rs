@@ -299,6 +299,16 @@ impl Runtime {
         unsafe { context.loadBackgroundContentWithCompletionHandler(&completion) };
     }
 
+    /// Offers a site's sign-in challenge to extensions that answer them;
+    /// `None` when none did and the person should be asked.
+    pub fn auth_required(
+        &self,
+        details: crate::AuthDetails,
+        done: impl FnOnce(Option<crate::AuthAnswer>) + 'static,
+    ) {
+        crate::auth::ask(&self.shared, details, Box::new(done));
+    }
+
     /// Runs an extension's toolbar action as a user click on `tab`: WebKit
     /// either fires `action.onClicked` or asks the host to present the popup.
     pub fn perform_action(&self, id: &str, tab: Option<u64>) -> bool {

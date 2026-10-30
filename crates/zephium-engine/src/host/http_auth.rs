@@ -11,8 +11,8 @@ use std::rc::Rc;
 
 use url::Url;
 use zephium_core::http_auth::{
-    Admission, AuthChallenge, AuthOrigin, HttpAuthSession, HttpCredentials, MainFrame,
-    HTTP_AUTH_TIMEOUT,
+    Admission, AuthChallenge, AuthOrigin, HttpAuthPrompt, HttpAuthSession, HttpCredentials,
+    MainFrame, HTTP_AUTH_TIMEOUT,
 };
 use zephium_core::ids::ItemId;
 use zephium_core::ports::engine::EngineEvent;
@@ -113,10 +113,46 @@ impl HttpAuthBroker {
         drop(session);
         drop(rejected);
         self.end(replaced);
-        if let Some(prompt) = prompt {
+        let Some(prompt) = prompt else { return };
+        // Password manager extensions answer first, as in Chrome; a retry
+        // after a wrong answer goes to the person.
+        #[cfg(target_os = "macos")]
+        if !prompt.retry {
+            let url = main_frame_url.map(str::to_owned).unwrap_or_else(|| {
+                let origin = &challenge.origin;
+                format!("{}://{}:{}/", origin.scheme(), origin.host(), origin.port())
+            });
+            let details = zephium_webext_macos::AuthDetails {
+                request_id: format!("{item}-{}", prompt.request),
+                url,
+                scheme: "basic".into(),
+                host: challenge.origin.host().to_owned(),
+                port: challenge.origin.port(),
+                proxy: challenge.proxy,
+                tab: None,
+            };
+            let offered = prompt.clone();
+            if super::dispatch::try_with(move |host| host.offer_http_auth(item, offered, details)) {
+                return;
+            }
+        }
+        self.show(prompt);
+    }
+
+    /// Asks the person, unless the request was answered or ended meanwhile.
+    pub(super) fn show(&self, prompt: HttpAuthPrompt) {
+        let pending = self
+            .session
+            .try_borrow()
+            .ok()
+            .and_then(|session| session.pending_request());
+        if pending == Some(prompt.request) {
             self.permit.emit(
                 &self.sink,
-                EngineEvent::HttpAuthRequested { id: item, prompt },
+                EngineEvent::HttpAuthRequested {
+                    id: self.item.get(),
+                    prompt,
+                },
             );
         }
     }
@@ -261,6 +297,60 @@ impl EngineHost {
     ) {
         if let Some(view) = self.views.get(&item) {
             view.http_auth.answer(request, credentials);
+        }
+    }
+
+    /// Offers a challenge to the tab profile's extensions, then settles it
+    /// with their answer or asks the person.
+    #[cfg(target_os = "macos")]
+    fn offer_http_auth(
+        &mut self,
+        item: ItemId,
+        prompt: HttpAuthPrompt,
+        mut details: zephium_webext_macos::AuthDetails,
+    ) {
+        let profile = match self.partitions.get(&item) {
+            Some(zephium_core::ports::engine::Partition::Ephemeral(_)) | None => None,
+            Some(partition) => Some(partition.profile()),
+        };
+        let settle = move |answer: Option<zephium_webext_macos::AuthAnswer>| {
+            let _ = super::dispatch::try_with(move |host| {
+                host.settle_http_auth_offer(item, prompt, answer)
+            });
+        };
+        match profile {
+            Some(profile) => {
+                details.tab = Some(self.webext.tab_number(profile, item));
+                self.webext
+                    .auth_required(profile, details, Box::new(settle));
+            }
+            None => settle(None),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn settle_http_auth_offer(
+        &mut self,
+        item: ItemId,
+        prompt: HttpAuthPrompt,
+        answer: Option<zephium_webext_macos::AuthAnswer>,
+    ) {
+        let Some(view) = self.views.get(&item) else {
+            return;
+        };
+        match answer {
+            Some(zephium_webext_macos::AuthAnswer::Credentials { username, password }) => {
+                match HttpCredentials::new(username, password) {
+                    Some(credentials) => {
+                        view.http_auth.answer(prompt.request, Some(credentials));
+                    }
+                    None => view.http_auth.show(prompt),
+                }
+            }
+            Some(zephium_webext_macos::AuthAnswer::Cancel) => {
+                view.http_auth.answer(prompt.request, None);
+            }
+            None => view.http_auth.show(prompt),
         }
     }
 

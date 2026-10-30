@@ -232,6 +232,10 @@ fn newest_exact_action_snapshot_replaces_and_failures_retain() {
     ));
     assert_eq!(shell.retry_extension_actions(), NativeWork::default());
     assert_eq!(engine.extension_action_requests().len(), 3);
+    // Settled actions change only through native invalidations; the
+    // maintenance heartbeat reads nothing.
+    shell.handle(Command::Tick);
+    assert_eq!(engine.extension_action_requests().len(), 3);
 
     let click_only = ExtensionActionState::new(
         runtime,

@@ -143,6 +143,12 @@ pub trait Host {
     fn password_filling_changed(&self, enabled: bool) {
         let _ = enabled;
     }
+
+    /// An extension changed its toolbar action as shown in a window's active
+    /// tab (or its default, which every tab without its own follows).
+    fn action_changed(&self, extension: &str) {
+        let _ = extension;
+    }
 }
 
 /// Closes the bridges an extension's worker opened. WebKit numbers message

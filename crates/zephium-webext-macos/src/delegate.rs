@@ -255,6 +255,32 @@ define_class!(
             );
         }
 
+        // A change to a background tab's own action shows nowhere until that
+        // tab is activated, which refreshes the toolbar anyway.
+        #[unsafe(method(webExtensionController:didUpdateAction:forExtensionContext:))]
+        fn did_update_action(
+            &self,
+            _controller: &WKWebExtensionController,
+            action: &WKWebExtensionAction,
+            context: &WKWebExtensionContext,
+        ) {
+            let Some(shared) = self.shared() else {
+                return;
+            };
+            let shown = unsafe { action.associatedTab() }.is_none_or(|tab| {
+                let tab: &AnyObject = tab.as_ref();
+                shared.graph.borrow().windows.iter().any(|window| {
+                    window.active_tab().is_some_and(|active| {
+                        std::ptr::eq(Retained::as_ptr(&active).cast::<AnyObject>(), tab)
+                    })
+                })
+            });
+            if shown {
+                let id = unsafe { context.uniqueIdentifier() }.to_string();
+                shared.host().action_changed(&id);
+            }
+        }
+
         #[unsafe(method(webExtensionController:presentPopupForAction:forExtensionContext:completionHandler:))]
         fn present_popup(
             &self,

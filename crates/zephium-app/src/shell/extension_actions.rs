@@ -190,7 +190,6 @@ impl ExtensionActionState {
         self.retry_profiles.try_insert(profile)
     }
 
-    #[cfg(test)]
     fn retry_profiles(&self) -> zephium_core::extensions::ExtensionActiveProfiles {
         self.retry_profiles
     }
@@ -350,23 +349,11 @@ impl Shell {
     }
 
     /// Retries only reads that were synchronously refused, terminally
-    /// rejected, or lost after native scheduling. With no pending work this is
-    /// a fixed-size empty iteration and performs no allocation or dispatch.
-    #[cfg(test)]
+    /// rejected, or lost after native scheduling. Native action changes
+    /// arrive as invalidations, so with no pending work this is a fixed-size
+    /// empty iteration and performs no allocation or dispatch.
     pub(super) fn retry_extension_actions(&mut self) -> NativeWork {
         let profiles = self.extension_actions.retry_profiles();
-        let mut native = NativeWork::default();
-        for profile in profiles.iter() {
-            native.merge(self.refresh_extension_actions(profile));
-        }
-        native
-    }
-
-    /// Low-frequency drift repair piggybacks on the browser's existing
-    /// maintenance heartbeat. It adds no timer or renderer wake and performs
-    /// at most one metadata-only read per active extension profile.
-    pub(super) fn maintain_extension_actions(&mut self) -> NativeWork {
-        let profiles = self.extension_browser_surfaces.active_profiles();
         let mut native = NativeWork::default();
         for profile in profiles.iter() {
             native.merge(self.refresh_extension_actions(profile));

@@ -1193,6 +1193,12 @@ impl Host for Bridge {
             )));
     }
 
+    fn action_changed(&self, _extension: &str) {
+        self.sink.emit(EngineEvent::ExtensionActionsInvalidated {
+            profile: self.profile,
+        });
+    }
+
     fn log(&self, extension: &str, level: LogLevel, message: &str) {
         // Extensions retry failing calls in loops; print each distinct line
         // once a minute with how often it repeated.

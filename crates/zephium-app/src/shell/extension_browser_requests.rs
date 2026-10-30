@@ -116,6 +116,9 @@ impl Shell {
                 ExtensionBrowserRequestAction::SetTabZoom { tab, percent } => {
                     self.extension_set_tab_zoom(profile, *tab, *percent)
                 }
+                ExtensionBrowserRequestAction::MoveTabs { tabs, before } => {
+                    self.extension_move_tabs(profile, tabs, *before)
+                }
             }
         };
 
@@ -400,6 +403,51 @@ impl Shell {
             return applied();
         }
         settle_native_dispatch(self.request_zoom(tab, target, super::zoom::ZoomOrigin::Person))
+    }
+
+    /// Reorders the day's tabs of the focused window; pinned tabs and tabs
+    /// in folders keep their places.
+    fn extension_move_tabs(
+        &mut self,
+        profile: ProfileId,
+        tabs: &[ItemId],
+        before: Option<ItemId>,
+    ) -> ExtensionBrowserRequestSettlement {
+        let Some(space) = self
+            .windows
+            .focused()
+            .filter(|window| window.profile == profile)
+            .map(|window| window.space)
+        else {
+            return rejected(ExtensionBrowserRequestRejection::InvalidScope);
+        };
+        if tabs
+            .iter()
+            .chain(&before)
+            .any(|tab| !self.extension_tab_in_scope(*tab, profile))
+        {
+            return rejected(ExtensionBrowserRequestRejection::InvalidScope);
+        }
+        let today = Placement::Space {
+            space,
+            section: SpaceSection::Today,
+        };
+        let roots = self.items.roots(today);
+        if tabs.iter().chain(&before).any(|tab| !roots.contains(tab))
+            || before.is_some_and(|before| tabs.contains(&before))
+        {
+            return rejected(ExtensionBrowserRequestRejection::Unsupported);
+        }
+        for tab in tabs {
+            if !self.items.move_tab_to_root(*tab, today, before) {
+                return rejected(ExtensionBrowserRequestRejection::InvalidRequest);
+            }
+        }
+        if self.commit(Vec::new()).rejected {
+            rejected(ExtensionBrowserRequestRejection::NativeAdmissionFailed)
+        } else {
+            applied()
+        }
     }
 
     fn extension_resident_tab(&self, profile: ProfileId, tab: ItemId) -> Option<&TabState> {

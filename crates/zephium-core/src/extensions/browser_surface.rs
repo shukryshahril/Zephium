@@ -169,6 +169,11 @@ pub enum ExtensionBrowserRequestAction {
         tab: ItemId,
         percent: Option<u16>,
     },
+    /// Puts `tabs`, in order, before `before` in their window, or last.
+    MoveTabs {
+        tabs: Box<[ItemId]>,
+        before: Option<ItemId>,
+    },
 }
 
 impl ExtensionBrowserRequestAction {
@@ -186,7 +191,8 @@ impl ExtensionBrowserRequestAction {
             | Self::GoForward { .. }
             | Self::DuplicateTab { .. }
             | Self::SetTabMuted { .. }
-            | Self::SetTabZoom { .. } => None,
+            | Self::SetTabZoom { .. }
+            | Self::MoveTabs { .. } => None,
         }
     }
 }

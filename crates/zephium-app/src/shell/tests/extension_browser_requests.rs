@@ -554,6 +554,73 @@ fn extensions_mute_zoom_and_duplicate_through_the_browser_model() {
 }
 
 #[test]
+fn extensions_reorder_only_the_days_tabs_of_the_focused_window() {
+    let (mut shell, engine, screen) = setup();
+    shell.handle(Command::Bootstrap);
+    let first = active_id(&screen);
+    let profile = shell.windows.focused().unwrap().profile;
+    let space = shell.windows.focused().unwrap().space;
+    for _ in 0..2 {
+        let (_, effects) = shell.open_tab_with_id().unwrap();
+        shell.commit(effects);
+    }
+    activate_extensions(&mut shell, profile);
+    let today = Placement::Space {
+        space,
+        section: SpaceSection::Today,
+    };
+    let before = shell.items.roots(today).to_vec();
+    assert_eq!(before.len(), 3);
+    assert!(before.contains(&first));
+    let (a, b, c) = (before[0], before[1], before[2]);
+
+    shell.handle(Command::Engine(request(
+        profile,
+        1,
+        ExtensionBrowserRequestAction::MoveTabs {
+            tabs: Box::new([a]),
+            before: Some(c),
+        },
+    )));
+    assert_eq!(shell.items.roots(today), &[b, a, c]);
+    shell.handle(Command::Engine(request(
+        profile,
+        2,
+        ExtensionBrowserRequestAction::MoveTabs {
+            tabs: Box::new([c, b]),
+            before: None,
+        },
+    )));
+    assert_eq!(shell.items.roots(today), &[a, c, b]);
+    assert!(engine.extension_browser_settlements()[..2].iter().all(
+        |(_, _, settlement)| *settlement
+            == ExtensionBrowserRequestSettlement::Applied(ExtensionBrowserRequestResult::Complete)
+    ));
+    let published: Vec<ItemId> = shell
+        .extension_browser_surfaces
+        .published_surface(profile)
+        .unwrap()
+        .tabs()
+        .map(|tab| tab.id())
+        .collect();
+    assert_eq!(published, [a, c, b]);
+
+    shell.handle(Command::Engine(request(
+        profile,
+        3,
+        ExtensionBrowserRequestAction::MoveTabs {
+            tabs: Box::new([a]),
+            before: Some(a),
+        },
+    )));
+    assert_eq!(
+        engine.extension_browser_settlements()[2].2,
+        ExtensionBrowserRequestSettlement::Rejected(ExtensionBrowserRequestRejection::Unsupported)
+    );
+    assert_eq!(shell.items.roots(today), &[a, c, b]);
+}
+
+#[test]
 fn extension_history_unavailable_is_not_reported_as_applied() {
     let (mut shell, engine, screen) = setup();
     shell.handle(Command::Bootstrap);

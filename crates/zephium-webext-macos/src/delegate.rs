@@ -29,6 +29,78 @@ define_class!(
 
     unsafe impl NSObjectProtocol for Delegate {}
 
+    // WebKit's private delegate method for tabs.move; without it the call
+    // reports that it is not implemented.
+    impl Delegate {
+        #[unsafe(method(_webExtensionController:moveTabs:toIndex:inWindow:forExtensionContext:completionHandler:))]
+        fn move_tabs(
+            &self,
+            _controller: &WKWebExtensionController,
+            tabs: &NSArray<AnyObject>,
+            index: usize,
+            window: *mut AnyObject,
+            _context: &WKWebExtensionContext,
+            completion: &DynBlock<dyn Fn(*mut NSError)>,
+        ) {
+            let completion = completion.copy();
+            let fail = |message: &str| {
+                let error = error(message);
+                completion.call((Retained::as_ptr(&error).cast_mut(),));
+            };
+            let Some(shared) = self.shared() else {
+                return fail("The browser is closing.");
+            };
+            let request = {
+                let graph = shared.graph.borrow();
+                let moved: Option<Vec<_>> = tabs
+                    .iter()
+                    .take(MAX_MOVED_TABS + 1)
+                    .map(|tab| {
+                        graph.windows.iter().flat_map(|w| w.tabs()).find(|candidate| {
+                            std::ptr::eq(Retained::as_ptr(candidate).cast::<AnyObject>(), &*tab)
+                        })
+                    })
+                    .collect();
+                let target = unsafe { window.as_ref() }
+                    .and_then(|window| window_id(&shared, window))
+                    .or_else(|| moved.as_ref()?.first()?.window().map(|window| window.id()));
+                match (moved, target.and_then(|id| graph.window(id))) {
+                    (Some(moved), Some(target)) if !moved.is_empty() && moved.len() <= MAX_MOVED_TABS => {
+                        if moved
+                            .iter()
+                            .any(|tab| tab.window().is_none_or(|w| w.id() != target.id()))
+                        {
+                            Err("Tabs cannot be moved to another window.")
+                        } else {
+                            let ids: Vec<u64> = moved.iter().map(|tab| tab.id()).collect();
+                            let before = target
+                                .tabs()
+                                .iter()
+                                .map(|tab| tab.id())
+                                .filter(|id| !ids.contains(id))
+                                .nth(index);
+                            Ok(TabRequest::Move { tabs: ids, before })
+                        }
+                    }
+                    _ => Err("No tab or window with that id."),
+                }
+            };
+            match request {
+                Ok(request) => shared.host().tab_request(
+                    request,
+                    Box::new(move |result| match result {
+                        Ok(_) => completion.call((std::ptr::null_mut(),)),
+                        Err(message) => {
+                            let error = error(&message);
+                            completion.call((Retained::as_ptr(&error).cast_mut(),));
+                        }
+                    }),
+                ),
+                Err(message) => fail(message),
+            }
+        }
+    }
+
     unsafe impl WKWebExtensionControllerDelegate for Delegate {
         #[unsafe(method_id(webExtensionController:openWindowsForExtensionContext:))]
         fn open_windows(
@@ -376,6 +448,9 @@ impl Delegate {
         self.ivars().shared.upgrade()
     }
 }
+
+/// Bounds the work one tabs.move asks of the browser.
+const MAX_MOVED_TABS: usize = 64;
 
 fn window_id(shared: &Shared, window: &AnyObject) -> Option<u64> {
     let graph = shared.graph.borrow();

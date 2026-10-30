@@ -95,6 +95,11 @@ pub enum TabRequest {
         tab: u64,
         factor: Option<f64>,
     },
+    /// Puts `tabs`, in order, before `before` in their window, or last.
+    Move {
+        tabs: Vec<u64>,
+        before: Option<u64>,
+    },
 }
 
 /// Completion for a [`TabRequest`]: the created or affected tab, or a message

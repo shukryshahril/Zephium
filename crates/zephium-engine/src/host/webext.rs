@@ -1506,6 +1506,15 @@ impl Host for Bridge {
                     None => return done(Err("No tab with that id.".into())),
                 }
             }
+            TabRequest::Move { tabs, before } => {
+                let moved: Option<Box<[ItemId]>> = tabs.iter().map(|id| tab(*id)).collect();
+                match (moved, before.map(|id| tab(id).ok_or(())).transpose()) {
+                    (Some(tabs), Ok(before)) => {
+                        ExtensionBrowserRequestAction::MoveTabs { tabs, before }
+                    }
+                    _ => return done(Err("No tab with that id.".into())),
+                }
+            }
             TabRequest::Pin { .. } | TabRequest::FocusWindow { .. } => {
                 return done(Ok(None));
             }

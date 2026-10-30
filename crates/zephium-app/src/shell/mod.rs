@@ -1279,6 +1279,7 @@ impl Shell {
             }
             Command::OpenExternal(urls) => self.open_external(urls),
             Command::Find(request) => self.find_in_page(request),
+            Command::ShowStoreButton { tab, button } => self.show_store_button(tab, button),
             Command::SetAppSetting { key, value } => {
                 let _ = self.operation_set_app_setting(key, value);
             }

@@ -1185,6 +1185,7 @@ impl RetirementGate {
             | event @ EngineEvent::Captured { id, .. }
             | event @ EngineEvent::HtmlExtracted { id, .. }
             | event @ EngineEvent::FindResult { id, .. }
+            | event @ EngineEvent::StoreButtonClicked { id, .. }
             | event @ EngineEvent::ShortcutPressed { item: id, .. } => item_token
                 .as_ref()
                 .is_some_and(|active| self.allows_item_token(id, active))
@@ -3208,6 +3209,13 @@ impl Engine for WebviewEngine {
 
     fn capture(&self, _id: ItemId) -> NativeDispatch {
         NativeDispatch::Unsupported
+    }
+
+    fn show_store_button(&self, id: ItemId, button: zephium_core::ports::engine::StoreButton) {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let _ = self.run_for_active_item(id, move |h| h.show_store_button(id, button));
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let _ = (id, button);
     }
 
     fn extract_html(&self, id: ItemId) -> NativeDispatch {

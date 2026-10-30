@@ -2935,6 +2935,7 @@
   "webext_review_update": "Güncelle",
   "webext_store_install": "Zephium'a ekle",
   "webext_store_installing": "Yükleniyor…",
+  "webext_store_adding": "Ekleniyor…",
   "webext_store_remove": "Zephium'dan kaldır",
   "webext_store_remove_again": "{name} ve verilerini kaldırmak için yeniden tıklayın",
   "tool_bookmarks": "Yer İşaretleri",

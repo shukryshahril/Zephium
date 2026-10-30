@@ -343,6 +343,52 @@ pub(crate) async fn web_extension_prepare(
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum WebExtensionStoreButtonState {
+    Add,
+    Adding,
+    Remove,
+}
+
+/// What the install button on the Web Store listing in `tab_id` shows. A
+/// click on it arrives as `zephium:web-extension-store-click`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn web_extension_store_button(
+    caller: WebviewWindow,
+    shell: State<'_, Handle>,
+    tab_id: String,
+    extension_id: String,
+    state: WebExtensionStoreButtonState,
+    label: String,
+) -> bool {
+    use zephium_core::ports::engine::{StoreButton, StoreButtonState};
+    if !authorize(&caller, CallerPolicy::Main, "web_extension_store_button") {
+        return false;
+    }
+    let Some(tab) = zephium_core::ids::ItemId::parse(&tab_id) else {
+        return false;
+    };
+    let label_chars = label.chars().count();
+    if label_chars == 0 || label_chars > zephium_core::ports::engine::MAX_STORE_BUTTON_LABEL_CHARS {
+        return false;
+    }
+    let state = match state {
+        WebExtensionStoreButtonState::Add => StoreButtonState::Add,
+        WebExtensionStoreButtonState::Adding => StoreButtonState::Adding,
+        WebExtensionStoreButtonState::Remove => StoreButtonState::Remove,
+    };
+    shell.dispatch(zephium_app::Command::ShowStoreButton {
+        tab,
+        button: StoreButton {
+            extension: extension_id,
+            state,
+            label,
+        },
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn web_extension_confirm(

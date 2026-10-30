@@ -600,6 +600,11 @@ pub enum Command {
         profile: ProfileId,
         extension: Box<zephium_core::ports::engine::WebExtensionLoad>,
     },
+    /// What the install button on the Web Store listing in `tab` shows.
+    ShowStoreButton {
+        tab: ItemId,
+        button: zephium_core::ports::engine::StoreButton,
+    },
     /// The profile an installation from `tab` would go to.
     ResolveWebExtensionTarget {
         tab: Option<ItemId>,

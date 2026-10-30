@@ -2935,6 +2935,7 @@
   "webext_review_update": "Оновити",
   "webext_store_install": "Додати до Zephium",
   "webext_store_installing": "Установлення…",
+  "webext_store_adding": "Додавання…",
   "webext_store_remove": "Видалити з Zephium",
   "webext_store_remove_again": "Натисніть ще раз, щоб видалити {name} і його дані",
   "tool_bookmarks": "Закладки",

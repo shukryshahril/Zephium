@@ -55,6 +55,8 @@ mod resources;
 mod scripts;
 mod site_permissions;
 mod stages;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod store_button;
 mod style_worker;
 #[cfg(target_os = "macos")]
 mod webext;
@@ -276,6 +278,8 @@ struct ObservedView {
     native_terminal_failure: Arc<dyn Fn(&'static str) + Send + Sync>,
     // Before `view`, so a running search is stopped while its view lives.
     find: Option<crate::platform::imp::FindSession>,
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    store_button: store_button::StoreButtonSlot,
     // Before `view`: the Ask panel's reader removes its scripts and
     // handlers from the view's controller while the view lives.
     #[cfg(all(

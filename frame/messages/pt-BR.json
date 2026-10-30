@@ -2935,6 +2935,7 @@
   "webext_review_update": "Atualizar",
   "webext_store_install": "Adicionar ao Zephium",
   "webext_store_installing": "Instalando…",
+  "webext_store_adding": "Adicionando…",
   "webext_store_remove": "Remover do Zephium",
   "webext_store_remove_again": "Clique de novo para remover {name} e os dados dela",
   "tool_bookmarks": "Favoritos",

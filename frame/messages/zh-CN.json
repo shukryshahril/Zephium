@@ -2935,6 +2935,7 @@
   "webext_review_update": "更新",
   "webext_store_install": "添加到 Zephium",
   "webext_store_installing": "正在安装…",
+  "webext_store_adding": "正在添加…",
   "webext_store_remove": "从 Zephium 移除",
   "webext_store_remove_again": "再次点按以移除 {name} 及其数据",
   "tool_bookmarks": "书签",

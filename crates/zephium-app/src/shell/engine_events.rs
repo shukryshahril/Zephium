@@ -598,6 +598,9 @@ impl Shell {
                 request,
                 entries,
             } => self.on_history_entries(id, request, entries),
+            EngineEvent::StoreButtonClicked { id, extension } => {
+                self.store_button_clicked(id, extension);
+            }
             EngineEvent::FindResult {
                 id,
                 query,
@@ -798,7 +801,8 @@ impl Shell {
             | EngineEvent::Captured { id, .. }
             | EngineEvent::HtmlExtracted { id, .. }
             | EngineEvent::HistoryEntries { id, .. }
-            | EngineEvent::FindResult { id, .. } => self.profile_of_item(*id),
+            | EngineEvent::FindResult { id, .. }
+            | EngineEvent::StoreButtonClicked { id, .. } => self.profile_of_item(*id),
             EngineEvent::MediaCaptureChanged { id, .. }
             | EngineEvent::AudioChanged { id, .. }
             | EngineEvent::MediaChanged { id, .. }

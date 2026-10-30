@@ -2935,6 +2935,7 @@
   "webext_review_update": "アップデート",
   "webext_store_install": "Zephium に追加",
   "webext_store_installing": "インストールしています…",
+  "webext_store_adding": "追加しています…",
   "webext_store_remove": "Zephium から削除",
   "webext_store_remove_again": "もう一度クリックすると {name} とそのデータを削除します",
   "tool_bookmarks": "ブックマーク",

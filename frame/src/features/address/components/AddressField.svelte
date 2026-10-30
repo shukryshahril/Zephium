@@ -85,6 +85,11 @@
     void listedId;
     removing = false;
   });
+  $effect(() => {
+    if (compact || listedInstalled === null || !webext.isRemovalAsked(listedInstalled.id)) return;
+    removing = true;
+    webext.settleRemovalAsk();
+  });
   let placeholder = $derived(
     activeContent === "extension_owned"
       ? "Extension page — enter an address to open a new tab"

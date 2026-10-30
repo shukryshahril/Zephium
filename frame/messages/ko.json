@@ -2935,6 +2935,7 @@
   "webext_review_update": "업데이트",
   "webext_store_install": "Zephium에 추가",
   "webext_store_installing": "설치하는 중…",
+  "webext_store_adding": "추가하는 중…",
   "webext_store_remove": "Zephium에서 제거",
   "webext_store_remove_again": "{name} 및 데이터를 제거하려면 한 번 더 누르세요",
   "tool_bookmarks": "북마크",

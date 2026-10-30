@@ -32,6 +32,11 @@
     "timeout": 8000
   },
   {
+    "eval": "const r = {}; const sleep = (ms) => new Promise((res) => setTimeout(res, ms)); const created = new Promise((res) => chrome.downloads.onCreated.addListener((item) => res([item.id, item.state, item.url, item.filename]))); const changed = new Promise((res) => chrome.downloads.onChanged.addListener((delta) => { if (delta.state) res([delta.id, delta.state.previous, delta.state.current, delta.exists && delta.exists.current]); })); const erased = new Promise((res) => chrome.downloads.onErased.addListener(res)); await sleep(500); r.listed = (await chrome.downloads.search({})).map((item) => [item.id, item.state, item.filename]); r.id = await chrome.downloads.download({ url: 'https://files.example/report.pdf', filename: 'reports/q3.pdf' }); r.created = await created; r.changed = await changed; r.search = (await chrome.downloads.search({ query: ['q3'], state: 'complete' })).map((item) => item.id); r.badUrl = await chrome.downloads.download({ url: 'file:///etc/hosts' }).catch((e) => e.message); r.open = await chrome.downloads.open(r.id).catch((e) => e.message); r.erase = await chrome.downloads.erase({ id: r.id }); r.erased = await erased; const blob = new Blob(['hello'], { type: 'text/plain' }); r.blob = await chrome.downloads.download({ url: URL.createObjectURL(blob), filename: 'hello.txt' }); r.unknown = await chrome.downloads.pause(999).catch((e) => e.message); return r;",
+    "in": "page",
+    "timeout": 8000
+  },
+  {
     "sleep": 500
   },
   {

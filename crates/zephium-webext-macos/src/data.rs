@@ -10,7 +10,7 @@ use zephium_core::extension_data::{
 };
 
 use crate::runtime::Shared;
-use crate::{api, bookmarks, events, history, sessions, top_sites};
+use crate::{api, bookmarks, downloads, events, history, sessions, top_sites};
 
 pub(crate) type Done = Box<dyn FnOnce(Result<Value, String>)>;
 pub(crate) type Answer = Box<dyn FnOnce(ExtensionDataReply) -> Result<Value, String>>;
@@ -24,9 +24,15 @@ pub(crate) struct Call {
 }
 
 pub(crate) fn handles(api: &str) -> bool {
-    ["history.", "bookmarks.", "topSites.", "sessions."]
-        .iter()
-        .any(|namespace| api.starts_with(namespace))
+    [
+        "history.",
+        "bookmarks.",
+        "topSites.",
+        "sessions.",
+        "downloads.",
+    ]
+    .iter()
+    .any(|namespace| api.starts_with(namespace))
 }
 
 pub(crate) fn request(
@@ -36,6 +42,9 @@ pub(crate) fn request(
     message: &Value,
     done: Done,
 ) {
+    if let Some(op) = api.strip_prefix("downloads.") {
+        return downloads::request(shared, extension, op, message, done);
+    }
     let call = match api.split_once('.') {
         Some(("history", op)) => history::call(op, message),
         Some(("bookmarks", op)) => bookmarks::call(op, message),
@@ -119,7 +128,8 @@ fn listens(shared: &Shared, permission: &str, names: &[&str]) -> bool {
 }
 
 /// Tells the host when what extensions listen to changes.
-pub(crate) fn refresh_interest(shared: &Shared) {
+pub(crate) fn refresh_interest(shared: &Rc<Shared>) {
+    downloads::refresh(shared);
     let interest = ExtensionDataInterest {
         history: listens(shared, history::PERMISSION, history::EVENTS),
         bookmarks: listens(shared, bookmarks::PERMISSION, bookmarks::EVENTS),

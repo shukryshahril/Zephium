@@ -8,3 +8,4 @@ const record = (name) => (...args) => {
 for (const name of ["onVisited", "onVisitRemoved"]) chrome.history[name].addListener(record(`history.${name}`));
 for (const name of ["onCreated", "onChanged", "onMoved", "onRemoved"]) chrome.bookmarks[name].addListener(record(`bookmarks.${name}`));
 chrome.sessions.onChanged.addListener(record("sessions.onChanged"));
+for (const name of ["onCreated", "onChanged", "onErased"]) chrome.downloads[name].addListener(record(`downloads.${name}`));

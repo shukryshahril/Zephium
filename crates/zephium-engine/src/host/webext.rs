@@ -28,8 +28,8 @@ use zephium_core::geometry::Rect;
 use zephium_core::ids::{ExtensionInstallId, ItemId, ProfileId, WindowId};
 use zephium_core::ports::engine::{EngineEvent, WebExtensionLoad, WebExtensionLoaded};
 use zephium_webext_macos::{
-    ExtensionSpec, Grants, Host, LogLevel, Runtime, TabRequest, TabRequestDone, TabSnapshot,
-    WindowSnapshot,
+    DownloadRequest, ExtensionSpec, Grants, Host, LogLevel, Runtime, TabRequest, TabRequestDone,
+    TabSnapshot, WindowSnapshot,
 };
 
 use objc2::runtime::ProtocolObject;
@@ -72,6 +72,7 @@ struct ProfileRuntime {
     runtime: Runtime,
     store: Retained<WKWebsiteDataStore>,
     bridge: Rc<Bridge>,
+    downloads: Rc<RefCell<super::webext_downloads::DownloadNumbers>>,
     installs: HashMap<ExtensionInstallId, Install>,
     surface: Option<ExtensionBrowserSurface>,
 }
@@ -101,6 +102,18 @@ struct Install {
 }
 
 impl WebextHost {
+    pub(super) fn downloads_runtime(
+        &self,
+        profile: ProfileId,
+    ) -> Option<(
+        &Runtime,
+        Rc<RefCell<super::webext_downloads::DownloadNumbers>>,
+    )> {
+        self.profiles
+            .get(&profile)
+            .map(|entry| (&entry.runtime, entry.downloads.clone()))
+    }
+
     /// A fresh configuration for one of the profile's tabs, attached to its
     /// runtime. The runtime is created with the profile's first view, so
     /// every tab can run content scripts.
@@ -143,6 +156,7 @@ impl WebextHost {
                 runtime,
                 store,
                 bridge,
+                downloads: Rc::default(),
                 installs: HashMap::new(),
                 surface: None,
             }
@@ -1465,6 +1479,32 @@ impl Host for Bridge {
                 &expire,
             )
         };
+    }
+
+    fn downloads(&self, request: DownloadRequest, done: super::webext_downloads::DownloadDone) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return done(Err("Downloads are not available.".into()));
+        };
+        let profile = self.profile;
+        // The runtime asks from inside its own callbacks; the host answers
+        // once it is free.
+        let bound = dispatch2::MainThreadBound::new((request, done), mtm);
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            let mtm = MainThreadMarker::new().expect("the main queue runs on the main thread");
+            let (request, done) = bound.into_inner(mtm);
+            let slot = Rc::new(RefCell::new(Some(done)));
+            let handed = slot.clone();
+            let admitted = super::try_with(move |host| {
+                if let Some(done) = handed.borrow_mut().take() {
+                    host.extension_downloads(profile, request, done);
+                }
+            });
+            if !admitted {
+                if let Some(done) = slot.borrow_mut().take() {
+                    done(Err("Downloads are not available right now.".into()));
+                }
+            }
+        });
     }
 
     fn data_interest(&self, interest: ExtensionDataInterest) {

@@ -386,7 +386,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["bookmarks", "history", "idle", "notifications", "privacy", "sessions", "topSites", "webRequestAuthProvider"]);
+  const BROWSER_PERMISSIONS = new Set(["bookmarks", "downloads", "downloads.open", "history", "idle", "notifications", "privacy", "sessions", "topSites", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -703,6 +703,73 @@
       restore: (sessionId, callback) =>
         typeof sessionId === "function" ? withCallback(restore(), sessionId) : withCallback(restore(sessionId), callback),
       onChanged: dataEvent("sessions.onChanged"),
+    });
+  }
+
+  // Downloads go through the browser's download manager with the same
+  // admission and prompts as the page in front. It keeps a download's origin
+  // and file name, never its full address or path.
+  if (!isContent && !chromeApi.downloads && declares("downloads")) {
+    const MAX_DATA = 32 * 1024 * 1024;
+    const ask = (op, fields, callback) => withCallback(native(`downloads.${op}`, fields), callback);
+    const byId = (op) => (id, callback) => ask(op, { id }, callback);
+    const refuse = (message) => (_id, callback) => withCallback(Promise.reject(new Error(message)), callback);
+    // An extension's own blob: addresses can't be read by the page that
+    // downloads; they go over as data: addresses.
+    const readable = async (url) => {
+      if (!/^blob:/i.test(url)) return url;
+      const blob = await (await fetch(url)).blob();
+      if (blob.size > MAX_DATA) throw new Error("The data is too large to download.");
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    };
+    const gesture = () => typeof navigator !== "undefined" && !!(navigator.userActivation && navigator.userActivation.isActive);
+    pin(chromeApi, "downloads", {
+      State: Object.freeze({ IN_PROGRESS: "in_progress", INTERRUPTED: "interrupted", COMPLETE: "complete" }),
+      DangerType: Object.freeze({
+        FILE: "file", URL: "url", CONTENT: "content", UNCOMMON: "uncommon", HOST: "host", UNWANTED: "unwanted",
+        SAFE: "safe", ACCEPTED: "accepted",
+      }),
+      FilenameConflictAction: Object.freeze({ UNIQUIFY: "uniquify", OVERWRITE: "overwrite", PROMPT: "prompt" }),
+      download: (options, callback) =>
+        withCallback(
+          readable(String((options && options.url) || "")).then((url) =>
+            native("downloads.download", { details: Object.assign({}, options, { url }) }),
+          ),
+          callback,
+        ),
+      search: (query, callback) => ask("search", { details: query || {} }, callback),
+      pause: byId("pause"),
+      resume: byId("resume"),
+      cancel: byId("cancel"),
+      erase: (query, callback) =>
+        withCallback(
+          native("downloads.search", { details: query || {} }).then(async (items) => {
+            const erased = [];
+            for (const item of items) {
+              if (item.state === "in_progress") continue;
+              try {
+                await native("downloads.erase", { id: item.id });
+                erased.push(item.id);
+              } catch {}
+            }
+            return erased;
+          }),
+          callback,
+        ),
+      // Chrome opens a download only on a user gesture.
+      open: (id, callback) =>
+        gesture() ? ask("open", { id }, callback) : refuse("User gesture required")(id, callback),
+      show: (id) => void native("downloads.show", { id }).catch(() => {}),
+      removeFile: refuse("Downloaded files are deleted only by the person."),
+      acceptDanger: refuse("Only the person can keep a file held for its type, from the downloads panel."),
+      onCreated: dataEvent("downloads.onCreated"),
+      onChanged: dataEvent("downloads.onChanged"),
+      onErased: dataEvent("downloads.onErased"),
     });
   }
 

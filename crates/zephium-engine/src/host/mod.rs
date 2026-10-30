@@ -60,6 +60,8 @@ mod store_button;
 mod style_worker;
 #[cfg(target_os = "macos")]
 mod webext;
+#[cfg(target_os = "macos")]
+mod webext_downloads;
 #[cfg(target_os = "windows")]
 mod webext_windows;
 #[cfg(all(

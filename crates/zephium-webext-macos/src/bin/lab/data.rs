@@ -1,5 +1,5 @@
-//! The lab's stand-in for the browser's stores: a little history, a few
-//! bookmarks and closed tabs, kept in memory, answering as the shell does and raising the
+//! The lab's stand-in for the browser's stores and download manager: a
+//! little history, a few bookmarks, closed tabs and downloads, kept in memory, answering as the shell does and raising the
 //! changes it would.
 
 use std::cell::{Cell, RefCell};
@@ -7,10 +7,12 @@ use std::cell::{Cell, RefCell};
 use zephium_core::bookmarks::{
     BookmarkChange, BookmarkEntry, BookmarkFailure, BookmarkReply, BookmarkRequest,
 };
+use zephium_core::downloads::{DownloadState, DownloadView};
 use zephium_core::extension_data::{
     ClosedTab, ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
     HistoryEntry, HistoryReply, HistoryRequest, TopSite, VisitEntry,
 };
+use zephium_webext_macos::{DownloadAnswer, DownloadItem, DownloadRequest};
 
 pub struct LabData {
     pub interest: Cell<ExtensionDataInterest>,
@@ -19,6 +21,8 @@ pub struct LabData {
     bookmarks: RefCell<Vec<BookmarkEntry>>,
     /// Newest first.
     closed: RefCell<Vec<ClosedTab>>,
+    /// Newest first.
+    pub downloads: RefCell<Vec<DownloadItem>>,
     next: Cell<i64>,
 }
 
@@ -57,6 +61,7 @@ impl Default for LabData {
                 })
                 .collect(),
             ),
+            downloads: RefCell::new(vec![download(1, "notes.txt", DownloadState::Completed)]),
             next: Cell::new(100),
         }
     }
@@ -70,6 +75,24 @@ fn mark(id: i64, parent: Option<i64>, title: &str, url: Option<&str>) -> Bookmar
         url: url.map(str::to_owned),
         title: title.into(),
         added_at: 1_700_000_000 + id,
+    }
+}
+
+pub fn download(id: u64, filename: &str, state: DownloadState) -> DownloadItem {
+    DownloadItem {
+        id,
+        view: DownloadView {
+            id: format!("01J00000000000000000000{id:03}"),
+            revision: "00000001".into(),
+            created_at: "1700000000".into(),
+            filename: filename.into(),
+            source: "https://files.example".into(),
+            source_is_context: false,
+            state,
+            received: "4".into(),
+            total: Some("4".into()),
+            error: None,
+        },
     }
 }
 
@@ -438,6 +461,54 @@ impl LabData {
             }
             _ => (BookmarkReply::Failed(BookmarkFailure::Invalid), None),
         }
+    }
+
+    /// What the download manager would answer, and whether its downloads
+    /// changed.
+    pub fn download(&self, request: DownloadRequest) -> (Result<DownloadAnswer, String>, bool) {
+        println!("DOWNLOADS {request:?}");
+        let mut downloads = self.downloads.borrow_mut();
+        let found = |id: u64| downloads.iter().position(|item| item.id == id);
+        match request {
+            DownloadRequest::Start { url, filename } => {
+                let id = downloads.iter().map(|item| item.id).max().unwrap_or(0) + 1;
+                let name = filename
+                    .unwrap_or_else(|| url.rsplit('/').next().unwrap_or("download").to_owned());
+                downloads.insert(0, download(id, &name, DownloadState::Receiving));
+                (Ok(DownloadAnswer::Started(id)), true)
+            }
+            DownloadRequest::List => (Ok(DownloadAnswer::Items(downloads.clone())), false),
+            DownloadRequest::Erase(id) => match found(id) {
+                Some(at) if downloads[at].view.state.terminal() => {
+                    downloads.remove(at);
+                    (Ok(DownloadAnswer::Done), true)
+                }
+                _ => (
+                    Err("The download can't do that in its current state.".into()),
+                    false,
+                ),
+            },
+            DownloadRequest::Pause(id)
+            | DownloadRequest::Resume(id)
+            | DownloadRequest::Cancel(id)
+            | DownloadRequest::Open(id)
+            | DownloadRequest::Show(id) => match found(id) {
+                Some(_) => (Ok(DownloadAnswer::Done), false),
+                None => (Err("Invalid downloadId.".into()), false),
+            },
+        }
+    }
+
+    /// Finishes every download in progress.
+    pub fn finish_downloads(&self) -> bool {
+        let mut changed = false;
+        for item in self.downloads.borrow_mut().iter_mut() {
+            if item.view.state == DownloadState::Receiving {
+                item.view.state = DownloadState::Completed;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Whether the shell would report `change`: only what someone hears.

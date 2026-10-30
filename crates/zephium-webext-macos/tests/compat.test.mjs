@@ -45,6 +45,10 @@ function context(kind, declared = []) {
             return [{ lastModified: 1, tab: { sessionId: "s1", url: "https://a.example/", title: "A" } }];
           case "sessions.restore":
             return { lastModified: 1, tab: { sessionId: message.sessionId || "s1", url: "https://example.com/", title: "A" } };
+          case "downloads.download":
+            return 5;
+          case "downloads.search":
+            return [{ id: 5, state: "complete" }, { id: 6, state: "in_progress" }];
           case "topSites.get":
             return [{ url: "https://a.example/", title: "A" }];
           case "bookmarks.create":
@@ -428,6 +432,24 @@ test("closed tabs restore as the active tab chrome.tabs describes", async () => 
   assert.equal(chrome.runtime.messages.at(-1).sessionId, "s2");
   assert.equal(JSON.stringify(await chrome.sessions.getDevices()), "[]");
   assert.equal(typeof chrome.sessions.onChanged.addListener, "function");
+});
+
+test("downloads pass options through and keep Chrome's gesture rule for opening", async () => {
+  assert.equal(context("page").chrome.downloads, undefined);
+  const { chrome } = context("page", ["downloads", "downloads.open"]);
+  assert.equal(await chrome.downloads.download({ url: "https://a.example/f.zip", filename: "f.zip" }), 5);
+  assert.equal(
+    JSON.stringify(chrome.runtime.messages.at(-1)),
+    JSON.stringify({ api: "downloads.download", details: { url: "https://a.example/f.zip", filename: "f.zip" } }),
+  );
+  assert.equal(JSON.stringify(await chrome.downloads.erase({ state: "complete" })), "[5]", "only finished downloads are erased");
+  assert.equal(chrome.runtime.messages.at(-1).api, "downloads.erase");
+  await assert.rejects(chrome.downloads.open(5), /User gesture required/);
+  assert.equal(chrome.runtime.messages.at(-1).api, "downloads.erase", "no gesture, no call");
+  await assert.rejects(chrome.downloads.removeFile(5));
+  chrome.downloads.show(5);
+  assert.equal(chrome.runtime.messages.at(-1).api, "downloads.show");
+  for (const name of ["onCreated", "onChanged", "onErased"]) assert.equal(typeof chrome.downloads[name].addListener, "function");
 });
 
 test("top sites are read from the browser", async () => {

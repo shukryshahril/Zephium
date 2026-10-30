@@ -14,6 +14,8 @@ use crate::{events, json};
 /// Kept in sync with `BROWSER_PERMISSIONS` in the compatibility layer.
 pub const BROWSER_PERMISSIONS: &[&str] = &[
     "bookmarks",
+    "downloads",
+    "downloads.open",
     "history",
     "idle",
     "notifications",

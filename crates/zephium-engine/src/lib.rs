@@ -1746,6 +1746,8 @@ impl WebviewEngine {
                         host.downloads =
                             Some(host::downloads::Downloads::new(store, Arc::new(notify)));
                     }
+                    #[cfg(target_os = "macos")]
+                    host.watch_extension_downloads();
                 });
             })
         }

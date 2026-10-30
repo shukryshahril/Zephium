@@ -104,6 +104,25 @@ function context(kind) {
         this.applied = options.addRules.map((rule) => rule.id);
         return Promise.resolve();
       },
+      updateDynamicRules(options) {
+        if (options.addRules.some((rule) => rule.condition && /\(\?[=!]/.test(rule.condition.regexFilter))) throw new Error("unexpected regexFilter");
+        return this.updateSessionRules(options);
+      },
+      enabled: ["a"],
+      compiling: 2,
+      attempts: 0,
+      getEnabledRulesets() {
+        return Promise.resolve([...this.enabled]);
+      },
+      getDynamicRules: () => Promise.resolve([]),
+      getSessionRules: () => Promise.resolve([]),
+      updateEnabledRulesets(options) {
+        this.attempts++;
+        const next = this.enabled.filter((id) => !(options.disableRulesetIds || []).includes(id)).concat(options.enableRulesetIds || []);
+        if (this.broken || (!next.length && this.compiling-- > 0)) return Promise.reject(new Error("Invalid call to declarativeNetRequest.updateEnabledRulesets(). Failed to apply rules."));
+        this.enabled = next;
+        return Promise.resolve();
+      },
     },
     permissions: {
       contains(request) {
@@ -340,4 +359,23 @@ test("API methods work apart from their namespace", async () => {
   const { getURL } = chrome.runtime;
   assert.equal((await query({ active: true })).length, 1);
   assert.match(getURL("x"), /\/x$/);
+});
+
+test("network rule updates keep what WebKit can apply", async () => {
+  const { chrome } = context("worker");
+  const net = chrome.declarativeNetRequest;
+  await net.updateDynamicRules({ addRules: [{ id: 1 }, { id: 2, condition: { regexFilter: "^https://a(?=b)" } }, { id: 3, custom: true }, { id: 4 }] });
+  assert.equal(JSON.stringify(net.applied), JSON.stringify([1, 4]));
+
+  await net.updateEnabledRulesets({ disableRulesetIds: ["a"] });
+  assert.equal(JSON.stringify(net.enabled), JSON.stringify([]));
+  assert.equal(net.attempts, 3);
+  net.enabled = ["a", "b"];
+  net.broken = true;
+  await assert.rejects(net.updateEnabledRulesets({ disableRulesetIds: ["a"] }), /Failed to apply rules/);
+  assert.equal(net.attempts, 4);
+
+  assert.equal(JSON.stringify(await net.getDisabledRuleIds({ rulesetId: "a" })), "[]");
+  await net.updateStaticRules({ rulesetId: "a", enableRuleIds: [] });
+  await assert.rejects(net.updateStaticRules({ rulesetId: "a", disableRuleIds: [1] }), /not supported/);
 });

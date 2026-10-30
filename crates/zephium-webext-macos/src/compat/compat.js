@@ -924,6 +924,17 @@
         withCallback(Promise.resolve(netRequest.GUARANTEED_MINIMUM_STATIC_RULES), callback),
       );
     }
+    // WebKit can't switch off single static rules, so none ever are.
+    if (typeof netRequest.getDisabledRuleIds !== "function") {
+      pin(netRequest, "getDisabledRuleIds", (_options, callback) => withCallback(Promise.resolve([]), callback));
+    }
+    if (typeof netRequest.updateStaticRules !== "function") {
+      pin(netRequest, "updateStaticRules", (options, callback) => {
+        const disabling = options && Array.isArray(options.disableRuleIds) && options.disableRuleIds.length;
+        const result = disabling ? Promise.reject(new Error("Disabling single static rules is not supported.")) : Promise.resolve();
+        return withCallback(result, callback);
+      });
+    }
     // WebKit's rule compiler takes JavaScript-like expressions without
     // lookaround or backreferences.
     const regexSupport = (options) => {
@@ -948,13 +959,28 @@
     });
   }
   if (netRequest) {
+    // Rules are checked one rejection at a time, so expressions WebKit's
+    // compiler can't take are dropped first, in one pass.
     const rejected = /rule at index (\d+)/;
+    const supported = async (rules) => {
+      const answers = new Map();
+      for (const rule of rules) {
+        const regex = rule && rule.condition && rule.condition.regexFilter;
+        if (typeof regex !== "string" || answers.has(regex)) continue;
+        answers.set(regex, netRequest.isRegexSupported({ regex }).then((answer) => answer.isSupported, () => true));
+      }
+      const unsupported = new Set();
+      for (const [regex, answer] of answers) if (!(await answer)) unsupported.add(regex);
+      return unsupported.size ? rules.filter((rule) => !unsupported.has(rule && rule.condition && rule.condition.regexFilter)) : rules;
+    };
     for (const method of ["updateSessionRules", "updateDynamicRules"]) {
       const original = netRequest[method];
       if (typeof original !== "function") continue;
       pin(netRequest, method, function (options, callback) {
-        let current = Object.assign({}, options);
-        const run = (attempts) => {
+        const rules = options && Array.isArray(options.addRules) ? options.addRules : [];
+        const skipped = [];
+        let dropped = 0;
+        const run = (current) => {
           let result;
           try {
             result = Promise.resolve(original.call(netRequest, current));
@@ -963,14 +989,47 @@
           }
           return result.catch((error) => {
             const index = Number((rejected.exec(String(error && error.message)) || [])[1]);
-            const rules = Array.isArray(current.addRules) ? current.addRules : [];
-            if (!(index < rules.length) || attempts <= 0) throw error;
-            if (Z.report) Z.report("warning", `skipped a network rule WebKit can't apply: ${error.message}`);
-            current = Object.assign({}, current, { addRules: rules.filter((_, i) => i !== index) });
-            return run(attempts - 1);
+            const kept = Array.isArray(current.addRules) ? current.addRules : [];
+            if (!(index < kept.length)) throw error;
+            dropped++;
+            skipped.push(error.message);
+            return run(Object.assign({}, current, { addRules: kept.filter((_, i) => i !== index) }));
           });
         };
-        return withCallback(run(50), callback);
+        const done = (rules.length ? supported(rules) : Promise.resolve(rules))
+          .then((usable) => {
+            dropped = rules.length - usable.length;
+            if (dropped) skipped.push(`${dropped} with a regexFilter WebKit can't compile`);
+            return run(rules.length ? Object.assign({}, options, { addRules: usable }) : options);
+          })
+          .finally(() => {
+            if (dropped && Z.report) Z.report("warning", `skipped ${dropped} network rule(s) WebKit can't apply: ${skipped.slice(0, 3).join("; ")}`);
+          });
+        return withCallback(done, callback);
+      });
+    }
+    // WebKit fails a change that leaves no rules at all while its first
+    // compile of the static rulesets is still running; Chrome applies it.
+    const updateEnabledRulesets = netRequest.updateEnabledRulesets;
+    if (typeof updateEnabledRulesets === "function") {
+      const leavesNoRules = async (options) => {
+        const enabled = new Set(await netRequest.getEnabledRulesets());
+        for (const id of options.disableRulesetIds || []) enabled.delete(id);
+        for (const id of options.enableRulesetIds || []) enabled.add(id);
+        if (enabled.size) return false;
+        const [dynamic, session] = await Promise.all([netRequest.getDynamicRules(), netRequest.getSessionRules()]);
+        return !dynamic.length && !session.length;
+      };
+      pin(netRequest, "updateEnabledRulesets", function (options, callback) {
+        const run = (delay) =>
+          Promise.resolve()
+            .then(() => updateEnabledRulesets.call(netRequest, options))
+            .catch(async (error) => {
+              if (delay > 16000 || !/Failed to apply rules\.$/.test(String(error && error.message)) || !(await leavesNoRules(options || {}))) throw error;
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              return run(delay * 2);
+            });
+        return withCallback(run(500), callback);
       });
     }
   }

@@ -24,7 +24,7 @@
     "check": [
       {
         "url": "/blockers.html",
-        "wait": 20000,
+        "wait": 45000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
     ]
@@ -39,7 +39,7 @@
     "check": [
       {
         "url": "/blockers.html",
-        "wait": 20000,
+        "wait": 45000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
     ]
@@ -54,7 +54,8 @@
         "wait": 20000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
-    ]
+    ],
+    "known": "its popup renders nothing; blocking works"
   },
   {
     "name": "Authenticator",
@@ -146,7 +147,8 @@
         "wait": 20000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
-    ]
+    ],
+    "known": "exempts localhost pages with an allowAllRequests rule, so the local fixture can't show its blocking"
   },
   {
     "name": "Enhancer for YouTube",

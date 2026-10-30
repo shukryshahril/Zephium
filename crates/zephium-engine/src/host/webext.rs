@@ -1156,6 +1156,22 @@ impl Bridge {
 }
 
 impl Host for Bridge {
+    fn password_filling_changed(&self, enabled: bool) {
+        crate::platform::macos::autofill::set_filling(self.profile, enabled);
+    }
+
+    fn access_removed(&self, extension: &str, permissions: &[String], patterns: &[String]) {
+        self.sink
+            .emit(EngineEvent::WebExtensionAccessRemoved(Box::new(
+                zephium_core::ports::engine::WebExtensionAccessRemoval {
+                    profile: self.profile,
+                    extension_id: extension.to_owned(),
+                    permissions: permissions.to_vec(),
+                    patterns: patterns.to_vec(),
+                },
+            )));
+    }
+
     fn prompt_access(
         &self,
         request: zephium_webext_macos::AccessRequest,

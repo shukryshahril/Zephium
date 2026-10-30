@@ -1334,6 +1334,16 @@ pub struct WebExtensionAccessRequest {
     pub patterns: Vec<String>,
 }
 
+/// Access an extension gave up itself (`permissions.remove`), so it is not
+/// granted again when the extension next starts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebExtensionAccessRemoval {
+    pub profile: ProfileId,
+    pub extension_id: String,
+    pub permissions: Vec<String>,
+    pub patterns: Vec<String>,
+}
+
 /// What the sidebar's player may ask of a tab's media.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MediaAction {
@@ -1438,6 +1448,7 @@ pub enum EngineEvent {
     /// An extension asked at run time for access the user must approve;
     /// answered through [`EnginePort::answer_web_extension_access`].
     WebExtensionAccessRequested(Box<WebExtensionAccessRequest>),
+    WebExtensionAccessRemoved(Box<WebExtensionAccessRemoval>),
     /// A native command matched the reserved browser-action shortcut for one
     /// exact published runtime and resident tab. The event carries no popup
     /// geometry: Shell must rejoin it to the current action snapshot and ask

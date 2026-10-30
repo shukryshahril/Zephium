@@ -1108,7 +1108,8 @@ impl RetirementGate {
             event @ EngineEvent::ExtensionBrowserRequested { .. }
             | event @ EngineEvent::ExtensionPageClosed { .. }
             | event @ EngineEvent::PermissionRequested { .. }
-            | event @ EngineEvent::WebExtensionAccessRequested(_) => Some(event),
+            | event @ EngineEvent::WebExtensionAccessRequested(_)
+            | event @ EngineEvent::WebExtensionAccessRemoved(_) => Some(event),
             EngineEvent::WebExtensionSettled {
                 profile,
                 install,

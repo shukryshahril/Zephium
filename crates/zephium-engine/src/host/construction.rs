@@ -2152,6 +2152,7 @@ impl EngineHost {
         #[cfg(target_os = "macos")]
         crate::platform::macos::autofill::show_key_in_sign_in_fields(
             &crate::platform::imp::native_webview(&view),
+            partition.profile(),
         );
         #[cfg(target_os = "windows")]
         let request_witness = crate::platform::imp::RequestWitness::install(

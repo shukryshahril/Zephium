@@ -497,6 +497,30 @@ pub(crate) async fn web_extension_retry(
     }
 }
 
+/// Forgets access an extension gave up itself, so the next launch doesn't
+/// grant it again.
+pub(crate) fn access_removed(
+    app: &tauri::AppHandle,
+    removal: zephium_ipc::WebExtensionAccessRemovalView,
+) {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let result = publication(move || {
+                let extensions = app.state::<WebExtensions>();
+                imp::access_removed(&extensions, removal)
+            })
+            .await;
+            if let Err(error) = result {
+                eprintln!("webext: could not record removed access: {error}");
+            }
+        });
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = (app, removal);
+}
+
 /// Answers an extension's run-time request for access; granted access is
 /// kept for the next launch.
 #[tauri::command]

@@ -1978,6 +1978,7 @@ fn apply_projection(view: &mut ItemsState, p: Projection) {
         Projection::ExtensionActionShortcut(_) => {}
         Projection::PagePermissionPrompt(_) => {}
         Projection::WebExtensionAccessRequest(_) => {}
+        Projection::WebExtensionAccessRemoved(_) => {}
         Projection::Favicons(_) => {}
         Projection::PanelOwner(_) => {}
         Projection::UiCommand(_) => {}

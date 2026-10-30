@@ -454,6 +454,14 @@ pub struct WebExtensionAccessRequestView {
     pub patterns: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebExtensionAccessRemovalView {
+    pub profile_id: String,
+    pub extension_id: String,
+    pub permissions: Vec<String>,
+    pub patterns: Vec<String>,
+}
+
 /// The one retained split group owned by the focused window. Members are
 /// normalized references into [`ItemsState::tabs`] in native pane traversal
 /// order; geometry and mutable divider ratios remain native-only authority.
@@ -1664,6 +1672,7 @@ pub enum Projection {
     ExtensionActionShortcut(ExtensionActionShortcutView),
     PagePermissionPrompt(PagePermissionPromptView),
     WebExtensionAccessRequest(WebExtensionAccessRequestView),
+    WebExtensionAccessRemoved(WebExtensionAccessRemovalView),
     UiCommand(String),
     FindResult(FindResultView),
     Search(SearchResults),

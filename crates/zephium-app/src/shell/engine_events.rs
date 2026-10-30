@@ -289,6 +289,17 @@ impl Shell {
                 install,
                 result,
             } => self.on_web_extension_settled(profile, install, result),
+            EngineEvent::WebExtensionAccessRemoved(removal) => {
+                let removal = *removal;
+                (self.emit)(Projection::WebExtensionAccessRemoved(
+                    zephium_ipc::WebExtensionAccessRemovalView {
+                        profile_id: removal.profile.to_string(),
+                        extension_id: removal.extension_id,
+                        permissions: removal.permissions,
+                        patterns: removal.patterns,
+                    },
+                ));
+            }
             EngineEvent::WebExtensionAccessRequested(request) => {
                 let request = *request;
                 (self.emit)(Projection::WebExtensionAccessRequest(
@@ -749,6 +760,7 @@ impl Shell {
             EngineEvent::ExtensionActionsInvalidated { profile } => Some(*profile),
             EngineEvent::WebExtensionSettled { profile, .. } => Some(*profile),
             EngineEvent::WebExtensionAccessRequested(request) => Some(request.profile),
+            EngineEvent::WebExtensionAccessRemoved(removal) => Some(removal.profile),
             EngineEvent::ExtensionActionShortcutRequested { runtime, .. } => {
                 Some(runtime.profile())
             }

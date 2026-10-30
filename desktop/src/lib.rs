@@ -6933,6 +6933,9 @@ pub fn run() {
                     EVENT_EXTENSION_ACTION_FAILED,
                     &failure,
                 ),
+                Projection::WebExtensionAccessRemoved(removal) => {
+                    webext::access_removed(&emit_handle, removal)
+                }
                 Projection::WebExtensionAccessRequest(request) => emit_to_privileged(
                     &emit_handle,
                     MAIN_LABEL,

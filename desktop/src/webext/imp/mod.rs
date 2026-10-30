@@ -919,6 +919,36 @@ pub(in crate::webext) fn answer_access(
     Ok(())
 }
 
+pub(in crate::webext) fn access_removed(
+    extensions: &WebExtensions,
+    removal: zephium_ipc::WebExtensionAccessRemovalView,
+) -> Result<(), String> {
+    let profile = ProfileId::parse(&removal.profile_id).ok_or("Invalid profile.")?;
+    let _publication = PUBLICATION
+        .lock()
+        .map_err(|_| "Extension state is unavailable.")?;
+    let mut registry = extensions.registry(profile);
+    let Some(entry) = registry
+        .extensions
+        .iter_mut()
+        .find(|entry| entry.id == removal.extension_id)
+    else {
+        return Ok(());
+    };
+    // Access the person accepted at install stays; only what was granted
+    // later can be given up.
+    let reviewed = |permission: &String| entry.reviewed_permissions.contains(permission);
+    let before = (entry.permissions.len(), entry.hosts.len());
+    entry
+        .permissions
+        .retain(|permission| reviewed(permission) || !removal.permissions.contains(permission));
+    entry.hosts.retain(|host| !removal.patterns.contains(host));
+    if before == (entry.permissions.len(), entry.hosts.len()) {
+        return Ok(());
+    }
+    extensions.save_existing(profile, &registry)
+}
+
 pub(in crate::webext) async fn uninstall(
     shell: &Handle,
     extensions: &WebExtensions,

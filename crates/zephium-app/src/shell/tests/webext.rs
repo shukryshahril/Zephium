@@ -8,6 +8,7 @@ fn load() -> WebExtensionLoad {
         extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         root: "/fixture".into(),
         external_native_messaging: false,
+        native_messaging_grantable: false,
         permissions: vec![],
         match_patterns: vec![],
         start_background: false,

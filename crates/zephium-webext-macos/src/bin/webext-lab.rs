@@ -273,6 +273,10 @@ impl Lab {
                             .get("reviewed_native_app")
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
+                        native_messaging_grantable: step
+                            .get("grantable_native_app")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                         inspectable: true,
                     };
                     this.runtime.load(spec, move |result| {

@@ -170,7 +170,8 @@ impl WebExtensions {
                 zephium_webext::permissions::external_native_messaging_allowed(
                     &entry.reviewed_permissions,
                     entry.publisher_verified,
-                ),
+                ) || (entry.publisher_verified && entry.native_messaging_granted),
+            native_messaging_grantable: entry.publisher_verified,
             match_patterns: granted_sites(entry),
             start_background,
         }
@@ -898,6 +899,9 @@ pub(in crate::webext) fn answer_access(
             .iter_mut()
             .find(|entry| entry.id == request.extension_id)
         {
+            if request.permissions.iter().any(|p| p == "nativeMessaging") {
+                entry.native_messaging_granted = entry.publisher_verified;
+            }
             for permission in request.permissions {
                 if !entry.permissions.contains(&permission) {
                     entry.permissions.push(permission);
@@ -937,13 +941,18 @@ pub(in crate::webext) fn access_removed(
     };
     // Access the person accepted at install stays; only what was granted
     // later can be given up.
-    let reviewed = |permission: &String| entry.reviewed_permissions.contains(permission);
+    let native = entry.native_messaging_granted
+        && removal.permissions.iter().any(|p| p == "nativeMessaging");
+    entry.native_messaging_granted &= !native;
+    let reviewed = |permission: &String| {
+        entry.reviewed_permissions.contains(permission) || permission == "nativeMessaging"
+    };
     let before = (entry.permissions.len(), entry.hosts.len());
     entry
         .permissions
         .retain(|permission| reviewed(permission) || !removal.permissions.contains(permission));
     entry.hosts.retain(|host| !removal.patterns.contains(host));
-    if before == (entry.permissions.len(), entry.hosts.len()) {
+    if !native && before == (entry.permissions.len(), entry.hosts.len()) {
         return Ok(());
     }
     extensions.save_existing(profile, &registry)

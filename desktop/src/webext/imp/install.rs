@@ -290,6 +290,8 @@ pub(super) fn stage(
             started: String::new(),
             permissions,
             reviewed_permissions,
+            native_messaging_granted: publisher_verified
+                && existing.is_some_and(|entry| entry.native_messaging_granted),
             publisher_verified,
             hosts,
             icon: icon.clone(),

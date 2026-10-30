@@ -92,6 +92,9 @@ struct Entry {
     /// CRX publisher possession was verified for this exact source package.
     #[serde(default)]
     publisher_verified: bool,
+    /// The person allowed native-app access the extension declares optional.
+    #[serde(default)]
+    native_messaging_granted: bool,
     hosts: Vec<String>,
     #[serde(default)]
     icon: Option<String>,

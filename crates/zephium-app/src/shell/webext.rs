@@ -375,6 +375,7 @@ fn unchanged(loaded: &WebExtensionLoad, wanted: &WebExtensionLoad) -> bool {
         && loaded.root == wanted.root
         && loaded.permissions == wanted.permissions
         && loaded.external_native_messaging == wanted.external_native_messaging
+        && loaded.native_messaging_grantable == wanted.native_messaging_grantable
         && loaded.match_patterns == wanted.match_patterns
 }
 
@@ -390,6 +391,7 @@ mod tests {
             root: "/packages/a/1.0-rev".into(),
             permissions: vec!["storage".into()],
             external_native_messaging: false,
+            native_messaging_grantable: false,
             match_patterns: vec!["<all_urls>".into()],
             start_background: true,
         };

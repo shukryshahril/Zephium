@@ -46,6 +46,9 @@ pub struct ExtensionSpec {
     pub grants: Grants,
     /// External hosts are separate from the compatibility native transport.
     pub external_native_messaging: bool,
+    /// May ask for external hosts at run time when the manifest declares
+    /// `nativeMessaging` optional.
+    pub native_messaging_grantable: bool,
     pub inspectable: bool,
 }
 
@@ -59,7 +62,8 @@ pub struct LoadedExtension {
 
 pub(crate) struct Loaded {
     pub(crate) context: Retained<WKWebExtensionContext>,
-    pub(crate) external_native_messaging: bool,
+    pub(crate) external_native_messaging: std::cell::Cell<bool>,
+    pub(crate) native_messaging_grantable: bool,
     /// Granted permissions of the APIs the browser implements itself.
     pub(crate) browser_permissions: RefCell<std::collections::BTreeSet<String>>,
 }
@@ -646,7 +650,8 @@ fn activate(
         spec.id,
         Loaded {
             context,
-            external_native_messaging: spec.external_native_messaging,
+            external_native_messaging: std::cell::Cell::new(spec.external_native_messaging),
+            native_messaging_grantable: spec.native_messaging_grantable,
             browser_permissions,
         },
     );

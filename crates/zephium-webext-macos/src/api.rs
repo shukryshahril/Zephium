@@ -15,8 +15,17 @@ use crate::{events, json};
 pub const BROWSER_PERMISSIONS: &[&str] =
     &["idle", "notifications", "privacy", "webRequestAuthProvider"];
 
+/// Native-app access an extension declares optional is granted here too:
+/// WebKit holds `nativeMessaging` for the browser's own bridges, so only the
+/// browser knows whether outside applications were allowed.
+const NATIVE: &str = "nativeMessaging";
+
 pub(crate) fn is_browser_permission(name: &str) -> bool {
     BROWSER_PERMISSIONS.contains(&name)
+}
+
+fn managed(name: &str) -> bool {
+    is_browser_permission(name) || name == NATIVE
 }
 
 /// What the manifest asks for among the browser's permissions, required and
@@ -24,18 +33,23 @@ pub(crate) fn is_browser_permission(name: &str) -> bool {
 pub(crate) fn declared(extension: &WKWebExtension) -> (Vec<String>, Vec<String>) {
     let manifest = unsafe { extension.manifest() };
     let manifest = json::from_object(Some(&manifest));
-    let list = |key: &str| -> Vec<String> {
+    let list = |key: &str, keep: fn(&str) -> bool| -> Vec<String> {
         manifest
             .get(key)
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter_map(Value::as_str)
-            .filter(|name| is_browser_permission(name))
+            .filter(|name| keep(name))
             .map(str::to_owned)
             .collect()
     };
-    (list("permissions"), list("optional_permissions"))
+    // The prepared manifest lists nativeMessaging as required for every
+    // package; only its optional declaration is the extension's own.
+    (
+        list("permissions", is_browser_permission),
+        list("optional_permissions", managed),
+    )
 }
 
 pub(crate) fn initial(extension: &WKWebExtension, grants: &Grants) -> BTreeSet<String> {
@@ -50,11 +64,13 @@ pub(crate) fn initial(extension: &WKWebExtension, grants: &Grants) -> BTreeSet<S
 }
 
 pub(crate) fn granted(shared: &Shared, extension: &str, permission: &str) -> bool {
-    shared
-        .loaded
-        .borrow()
-        .get(extension)
-        .is_some_and(|loaded| loaded.browser_permissions.borrow().contains(permission))
+    shared.loaded.borrow().get(extension).is_some_and(|loaded| {
+        if permission == NATIVE {
+            loaded.external_native_messaging.get()
+        } else {
+            loaded.browser_permissions.borrow().contains(permission)
+        }
+    })
 }
 
 pub(crate) fn extension_id(context: &WKWebExtensionContext) -> String {
@@ -68,8 +84,8 @@ fn requested(message: &Value) -> Vec<String> {
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .filter(|name| is_browser_permission(name))
-        .take(BROWSER_PERMISSIONS.len())
+        .filter(|name| managed(name))
+        .take(BROWSER_PERMISSIONS.len() + 1)
         .map(str::to_owned)
         .collect()
 }
@@ -82,12 +98,16 @@ pub(crate) fn state(shared: &Shared, context: &WKWebExtensionContext) -> Value {
         .borrow()
         .get(&id)
         .map(|loaded| {
-            loaded
+            let mut granted: Vec<String> = loaded
                 .browser_permissions
                 .borrow()
                 .iter()
                 .cloned()
-                .collect()
+                .collect();
+            if loaded.external_native_messaging.get() {
+                granted.push(NATIVE.to_owned());
+            }
+            granted
         })
         .unwrap_or_default();
     let (required, optional) = declared(&*unsafe { context.webExtension() });
@@ -120,6 +140,15 @@ pub(crate) fn request(
     if missing.is_empty() {
         return done(Ok(Value::Bool(true)));
     }
+    // Outside applications only for a package whose publisher was verified.
+    let grantable = shared
+        .loaded
+        .borrow()
+        .get(&id)
+        .is_some_and(|loaded| loaded.native_messaging_grantable);
+    if missing.iter().any(|name| name == NATIVE) && !grantable {
+        return done(Ok(Value::Bool(false)));
+    }
     let weak = Rc::downgrade(shared);
     let extension = id.clone();
     crate::access::request(
@@ -144,7 +173,13 @@ fn grant(shared: &Rc<Shared>, extension: &str, permissions: &[String]) {
             let mut set = loaded.browser_permissions.borrow_mut();
             permissions
                 .iter()
-                .filter(|name| set.insert((*name).clone()))
+                .filter(|name| {
+                    if name.as_str() == NATIVE {
+                        !loaded.external_native_messaging.replace(true)
+                    } else {
+                        set.insert((*name).clone())
+                    }
+                })
                 .cloned()
                 .collect()
         }
@@ -175,10 +210,22 @@ pub(crate) fn remove(
     let removed: Vec<String> = match shared.loaded.borrow().get(&id) {
         Some(loaded) => {
             let mut set = loaded.browser_permissions.borrow_mut();
-            wanted.into_iter().filter(|name| set.remove(name)).collect()
+            wanted
+                .into_iter()
+                .filter(|name| {
+                    if name == NATIVE {
+                        loaded.external_native_messaging.replace(false)
+                    } else {
+                        set.remove(name)
+                    }
+                })
+                .collect()
         }
         None => Vec::new(),
     };
+    if removed.iter().any(|name| name == NATIVE) {
+        crate::native::close_extension(shared, &id);
+    }
     if !removed.is_empty() {
         shared.host().access_removed(&id, &removed, &[]);
         crate::privacy::forget_if_revoked(shared, &id);

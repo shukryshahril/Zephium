@@ -377,6 +377,11 @@
   })();
   const declares = (name) =>
     [].concat(manifest.permissions || [], manifest.optional_permissions || []).includes(name);
+  // Optional native-app access is the browser's to grant: WebKit already holds
+  // nativeMessaging for the browser's own bridges.
+  const browserManaged = (name) =>
+    BROWSER_PERMISSIONS.has(name) ||
+    (name === "nativeMessaging" && (manifest.optional_permissions || []).includes(name));
 
   // Chrome answers "not granted" for permissions a browser doesn't know;
   // WebKit throws, which takes down callers such as Bitwarden's popup. The
@@ -400,9 +405,9 @@
       pin(permissions, method, function (request, callback) {
         const current = Object.assign({}, request);
         const requested = Array.isArray(current.permissions) ? current.permissions : [];
-        const browserNames = requested.filter((name) => BROWSER_PERMISSIONS.has(name));
+        const browserNames = requested.filter(browserManaged);
         let unknown = requested.some((name) => unknownNames.has(name));
-        current.permissions = requested.filter((name) => !unknownNames.has(name) && !BROWSER_PERMISSIONS.has(name));
+        current.permissions = requested.filter((name) => !unknownNames.has(name) && !browserManaged(name));
         let result;
         for (;;) {
           const listed = Array.isArray(current.permissions) ? current.permissions : [];
@@ -449,7 +454,7 @@
     }
     // Only extensions that can hold the browser's own permissions hear about
     // them; a listening port keeps a worker loaded longer.
-    if (hub && [...BROWSER_PERMISSIONS].some(declares)) {
+    if (hub && ([...BROWSER_PERMISSIONS].some(declares) || browserManaged("nativeMessaging"))) {
       for (const name of ["onAdded", "onRemoved"]) {
         const theirs = permissions[name];
         if (theirs && typeof theirs.addListener === "function") adopt(theirs, hub.event(`permissions.${name}`), true);

@@ -192,6 +192,7 @@ impl WebextHost {
                 match_patterns: load.match_patterns,
             },
             external_native_messaging: load.external_native_messaging,
+            native_messaging_grantable: load.native_messaging_grantable,
             inspectable: true,
         };
         let install = load.install;
@@ -280,6 +281,7 @@ impl WebextHost {
                 match_patterns: load.match_patterns,
             },
             external_native_messaging: false,
+            native_messaging_grantable: false,
             inspectable: false,
         };
         entry.runtime.load(spec, move |_| {

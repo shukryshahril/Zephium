@@ -56,6 +56,9 @@ pub struct WebExtensionLoad {
     pub permissions: Vec<String>,
     /// Explicit original native-app grant bound to authenticated package provenance.
     pub external_native_messaging: bool,
+    /// The authenticated package may ask for native-app access it declares
+    /// optional; the person answers at run time.
+    pub native_messaging_grantable: bool,
     pub match_patterns: Vec<String>,
     /// Set when the package changed since WebKit last ran it, so its
     /// background runs once and WebKit relearns what it listens for.

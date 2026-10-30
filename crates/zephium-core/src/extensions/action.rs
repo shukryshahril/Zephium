@@ -14,7 +14,9 @@ use crate::ids::ItemId;
 use super::{ExtensionBrowserSurfaceGeneration, ExtensionRuntimeInstance};
 
 /// One snapshot carries at most one action per installed extension.
-pub const MAX_EXTENSION_INSTALLS_PER_PROFILE: usize = 8;
+pub const MAX_EXTENSION_INSTALLS_PER_PROFILE: usize = 64;
+/// Each running extension on Windows keeps a hidden WebView2 page of its own.
+pub const WINDOWS_RUNNING_EXTENSIONS: usize = 8;
 /// Stable settlement reason used to retry Windows admission after a slot opens.
 pub const WINDOWS_EXTENSION_CAPACITY_MESSAGE: &str =
     "This Windows build supports eight running extensions.";

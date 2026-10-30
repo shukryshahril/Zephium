@@ -202,7 +202,7 @@ impl Shell {
                     )
                 })
                 .count();
-            if active >= zephium_core::extensions::MAX_EXTENSION_INSTALLS_PER_PROFILE {
+            if active >= zephium_core::extensions::WINDOWS_RUNNING_EXTENSIONS {
                 break;
             }
             self.web_extensions

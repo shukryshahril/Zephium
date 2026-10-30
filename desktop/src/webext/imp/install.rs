@@ -186,7 +186,7 @@ async fn review(
     #[cfg(target_os = "windows")]
     let review = {
         let mut review = review;
-        if enabled >= zephium_core::extensions::MAX_EXTENSION_INSTALLS_PER_PROFILE
+        if enabled >= zephium_core::extensions::WINDOWS_RUNNING_EXTENSIONS
             && !enabled_ids.contains(&review.id)
         {
             review.warnings.push("Windows can run eight extensions at once across all profiles. This extension will wait until you disable or remove another running extension.".into());

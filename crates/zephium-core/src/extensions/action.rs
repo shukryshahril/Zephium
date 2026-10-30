@@ -298,6 +298,7 @@ pub struct ExtensionActionRequest {
     surface_generation: ExtensionBrowserSurfaceGeneration,
     action_revision: ExtensionActionRevision,
     anchor: ExtensionPopupAnchor,
+    menu: bool,
 }
 
 impl ExtensionActionRequest {
@@ -316,7 +317,20 @@ impl ExtensionActionRequest {
             surface_generation,
             action_revision,
             anchor,
+            menu: false,
         }
+    }
+
+    /// Shows the action's context menu (its `contexts: ["action"]` items)
+    /// at the anchor instead of clicking it.
+    #[must_use]
+    pub const fn for_menu(mut self) -> Self {
+        self.menu = true;
+        self
+    }
+
+    pub const fn is_menu(self) -> bool {
+        self.menu
     }
 
     pub const fn id(self) -> ExtensionActionRequestId {

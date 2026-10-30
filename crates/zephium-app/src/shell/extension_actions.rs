@@ -205,6 +205,7 @@ impl ExtensionActionState {
         runtime: ExtensionRuntimeInstance,
         revision: ExtensionActionRevision,
         anchor: ExtensionPopupAnchor,
+        menu: bool,
     ) -> Result<ExtensionActionRequest, ExtensionActionRejection> {
         let profile = runtime.profile();
         let surface = current_surface
@@ -230,7 +231,8 @@ impl ExtensionActionState {
         if action.revision() != revision {
             return Err(ExtensionActionRejection::RuntimeSuperseded);
         }
-        if !action.is_enabled() {
+        // A disabled action still has its menu, as in Chrome.
+        if !action.is_enabled() && !menu {
             return Err(ExtensionActionRejection::ActionDisabled);
         }
         if self.pending.len() >= MAX_PENDING_EXTENSION_ACTIONS {
@@ -241,8 +243,11 @@ impl ExtensionActionState {
             .and_then(ExtensionActionRequestId::new)
             .ok_or(ExtensionActionRejection::NativeAdmissionFailed)?;
         self.next_request_id = id.get().checked_add(1);
-        let request =
+        let mut request =
             ExtensionActionRequest::new(id, runtime, tab, surface.generation(), revision, anchor);
+        if menu {
+            request = request.for_menu();
+        }
         if self.pending.contains_key(&id) {
             return Err(ExtensionActionRejection::NativeAdmissionFailed);
         }
@@ -265,6 +270,10 @@ impl ExtensionActionState {
         };
         if pending.runtime().profile() != profile {
             return ExtensionActionInvocationObservation::Contradictory;
+        }
+        // A menu that could not open shows nothing to report.
+        if pending.is_menu() {
+            return ExtensionActionInvocationObservation::Dispatched;
         }
         match settlement {
             ExtensionActionSettlement::Dispatched => {
@@ -364,11 +373,23 @@ impl Shell {
     /// Admits a toolbar intent only against the exact Shell-visible action.
     /// The caller cannot select a tab, surface generation, or newer revision;
     /// those are derived from the current authoritative projection here.
+    #[cfg(test)]
     pub(super) fn invoke_extension_action(
         &mut self,
         runtime: ExtensionRuntimeInstance,
         revision: ExtensionActionRevision,
         anchor: ExtensionPopupAnchor,
+    ) -> Result<ExtensionActionRequestId, ExtensionActionRejection> {
+        self.dispatch_extension_action(runtime, revision, anchor, false)
+    }
+
+    /// [`Self::invoke_extension_action`], or the action's context menu.
+    pub(super) fn dispatch_extension_action(
+        &mut self,
+        runtime: ExtensionRuntimeInstance,
+        revision: ExtensionActionRevision,
+        anchor: ExtensionPopupAnchor,
+        menu: bool,
     ) -> Result<ExtensionActionRequestId, ExtensionActionRejection> {
         let request = self.extension_actions.begin_invocation(
             self.extension_browser_surfaces
@@ -376,6 +397,7 @@ impl Shell {
             runtime,
             revision,
             anchor,
+            menu,
         )?;
         match self.engine.invoke_extension_action(request) {
             NativeDispatch::Scheduled => Ok(request.id()),

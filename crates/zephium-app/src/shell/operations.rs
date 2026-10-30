@@ -73,7 +73,8 @@ impl Shell {
                 runtime,
                 revision,
                 anchor,
-            } => self.operation_invoke_extension_action(runtime, revision, anchor),
+                menu,
+            } => self.operation_invoke_extension_action(runtime, revision, anchor, menu),
             Command::OpenUrl { input, new_tab } => self.operation_open_url(input, new_tab),
             Command::SetAppSetting { key, value } => self.operation_set_app_setting(key, value),
             #[cfg(feature = "work-planning")]
@@ -278,8 +279,9 @@ impl Shell {
         runtime: zephium_core::extensions::ExtensionRuntimeInstance,
         revision: zephium_core::extensions::ExtensionActionRevision,
         anchor: zephium_core::extensions::ExtensionPopupAnchor,
+        menu: bool,
     ) -> OperationDisposition {
-        match self.invoke_extension_action(runtime, revision, anchor) {
+        match self.dispatch_extension_action(runtime, revision, anchor, menu) {
             Ok(_) => operation_result(
                 OperationOutcome::Deferred,
                 OperationReason::NativeWorkPending,

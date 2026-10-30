@@ -1751,6 +1751,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             tabs_leave_split,
             chrome_menu_popup,
             extension_action_invoke,
+            extension_action_menu,
             webext::web_extension_prepare,
             webext::web_extension_confirm,
             webext::web_extension_cancel,
@@ -3233,35 +3234,89 @@ fn extension_action_invoke(
     anchor_width: f64,
     anchor_height: f64,
 ) -> zephium_ipc::OperationAdmission {
-    if !authorize(&caller, CallerPolicy::Main, "extension_action_invoke")
+    extension_action(
+        &caller,
+        &shell,
+        "extension_action_invoke",
+        [
+            &profile_id,
+            &install_id,
+            &runtime_generation,
+            &action_revision,
+        ],
+        [anchor_x, anchor_y, anchor_width, anchor_height],
+        false,
+    )
+}
+
+/// The context menu of an extension's toolbar button, under the button.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+fn extension_action_menu(
+    caller: WebviewWindow,
+    shell: State<'_, Handle>,
+    profile_id: String,
+    install_id: String,
+    runtime_generation: String,
+    action_revision: String,
+    anchor_x: f64,
+    anchor_y: f64,
+    anchor_width: f64,
+    anchor_height: f64,
+) -> zephium_ipc::OperationAdmission {
+    extension_action(
+        &caller,
+        &shell,
+        "extension_action_menu",
+        [
+            &profile_id,
+            &install_id,
+            &runtime_generation,
+            &action_revision,
+        ],
+        [anchor_x, anchor_y, anchor_width, anchor_height],
+        true,
+    )
+}
+
+fn extension_action(
+    caller: &WebviewWindow,
+    shell: &Handle,
+    command: &'static str,
+    [profile_id, install_id, runtime_generation, action_revision]: [&str; 4],
+    [anchor_x, anchor_y, anchor_width, anchor_height]: [f64; 4],
+    menu: bool,
+) -> zephium_ipc::OperationAdmission {
+    if !authorize(caller, CallerPolicy::Main, command)
         || shutdown_started(caller.app_handle())
-        || !bounded(&profile_id, MAX_ITEM_ID_BYTES)
-        || !bounded(&install_id, MAX_ITEM_ID_BYTES)
+        || !bounded(profile_id, MAX_ITEM_ID_BYTES)
+        || !bounded(install_id, MAX_ITEM_ID_BYTES)
     {
         return rejected_extension_action("caller-or-identity-boundary");
     }
     let Some(profile) =
-        ProfileId::parse(&profile_id).filter(|profile| profile.to_string() == profile_id)
+        ProfileId::parse(profile_id).filter(|profile| profile.to_string() == profile_id)
     else {
         return rejected_extension_action("profile-identity");
     };
     let Some(install) =
-        ExtensionInstallId::parse(&install_id).filter(|install| install.to_string() == install_id)
+        ExtensionInstallId::parse(install_id).filter(|install| install.to_string() == install_id)
     else {
         return rejected_extension_action("install-identity");
     };
     let Some(generation) =
-        fixed_nonzero_hex(&runtime_generation).and_then(ExtensionRuntimeGeneration::new)
+        fixed_nonzero_hex(runtime_generation).and_then(ExtensionRuntimeGeneration::new)
     else {
         return rejected_extension_action("runtime-generation");
     };
-    let Some(revision) = fixed_nonzero_hex(&action_revision).and_then(ExtensionActionRevision::new)
+    let Some(revision) = fixed_nonzero_hex(action_revision).and_then(ExtensionActionRevision::new)
     else {
         return rejected_extension_action("action-revision");
     };
     // On macOS the chrome webview shrinks to the sidebar beside a web page, so
     // its own size is not the window's; the anchor must fit the window.
-    let window = platform::imp::content_size(&caller).unwrap_or_else(|| inner_logical(&caller));
+    let window = platform::imp::content_size(caller).unwrap_or_else(|| inner_logical(caller));
     // DOMRect is relative to the positioned privileged chrome WebView, while
     // the native popup parent is the window content view. Apply the same
     // generation-checked chrome origin used by drag/menu coordinates; never
@@ -3284,11 +3339,12 @@ fn extension_action_invoke(
     };
     let admission = dispatch_operation(
         caller.app_handle(),
-        &shell,
+        shell,
         Command::InvokeExtensionAction {
             runtime: ExtensionRuntimeInstance::new(profile, install, generation),
             revision,
             anchor,
+            menu,
         },
     );
     if !admission.accepted {

@@ -558,6 +558,22 @@ impl WebextHost {
                 ExtensionActionRejection::RuntimeUnavailable,
             );
         }
+        if request.is_menu() {
+            let tab_object = entry.runtime.tab_object(tab);
+            let Some(action) = entry
+                .runtime
+                .context(&extension_id)
+                .and_then(|context| unsafe { context.actionForTab(tab_object.as_deref()) })
+            else {
+                return ExtensionActionSettlement::Rejected(
+                    ExtensionActionRejection::ActionUnavailable,
+                );
+            };
+            if let Some(parent) = parent {
+                present_action_menu(&action, parent, request.anchor().rect());
+            }
+            return ExtensionActionSettlement::Dispatched;
+        }
         *entry.bridge.popup.borrow_mut() = parent.map(|parent| (parent, request.anchor().rect()));
         // WebKit drops what a popup sends while the worker sleeps, and the
         // popup then waits forever; wake it first (immediate when running).
@@ -730,6 +746,49 @@ impl WebextHost {
         }
         true
     }
+}
+
+/// Chrome's `contextMenus.ACTION_MENU_TOP_LEVEL_LIMIT`.
+const ACTION_MENU_TOP_LEVEL_LIMIT: usize = 6;
+
+/// Pops up an action's `contexts: ["action"]` items under its button. WebKit's
+/// items run `contextMenus.onClicked` and grant activeTab themselves. The menu
+/// tracks in a run loop of its own, so it opens after the host is released.
+fn present_action_menu(action: &WKWebExtensionAction, parent: Retained<NSView>, anchor: Rect) {
+    let items: Vec<_> = unsafe { action.menuItems() }
+        .iter()
+        .take(ACTION_MENU_TOP_LEVEL_LIMIT)
+        .collect();
+    if items.is_empty() {
+        return;
+    }
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let bound = dispatch2::MainThreadBound::new((items, parent), mtm);
+    dispatch2::DispatchQueue::main().exec_async(move || {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let (items, parent) = bound.into_inner(mtm);
+        let menu = objc2_app_kit::NSMenu::new(mtm);
+        menu.setAutoenablesItems(false);
+        for item in &items {
+            if unsafe { item.menu() }.is_none() {
+                menu.addItem(item);
+            }
+        }
+        let y = if parent.isFlipped() {
+            anchor.y + anchor.height
+        } else {
+            parent.bounds().size.height - anchor.y - anchor.height
+        };
+        menu.popUpMenuPositioningItem_atLocation_inView(
+            None,
+            NSPoint::new(anchor.x, y),
+            Some(&parent),
+        );
+    });
 }
 
 /// Whether a key equivalent in `menu` or its submenus takes `event`.

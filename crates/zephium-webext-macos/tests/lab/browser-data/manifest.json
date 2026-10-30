@@ -6,6 +6,7 @@
     "history",
     "bookmarks",
     "topSites",
+    "sessions",
     "storage"
   ],
   "background": {

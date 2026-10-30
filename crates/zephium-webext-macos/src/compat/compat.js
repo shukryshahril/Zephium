@@ -386,7 +386,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["bookmarks", "history", "idle", "notifications", "privacy", "topSites", "webRequestAuthProvider"]);
+  const BROWSER_PERMISSIONS = new Set(["bookmarks", "history", "idle", "notifications", "privacy", "sessions", "topSites", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -677,6 +677,32 @@
       deleteAll: (callback) => dataCall("history.deleteAll")({}, callback),
       onVisited: dataEvent("history.onVisited"),
       onVisitRemoved: dataEvent("history.onVisitRemoved"),
+    });
+  }
+
+  // Recently closed tabs; the browser reopens tabs, not whole windows, and
+  // syncs no devices. A reopened tab is the active one, which tabs.query
+  // describes in full.
+  if (!isContent && !chromeApi.sessions && declares("sessions")) {
+    const restore = (sessionId) =>
+      native("sessions.restore", { sessionId }).then(async (restored) => {
+        try {
+          const [tab] = await chromeApi.tabs.query({ active: true, lastFocusedWindow: true });
+          if (tab && tab.url === restored.tab.url) restored.tab = tab;
+        } catch {}
+        return restored;
+      });
+    pin(chromeApi, "sessions", {
+      MAX_SESSION_RESULTS: 25,
+      getRecentlyClosed: (filter, callback) =>
+        typeof filter === "function"
+          ? withCallback(native("sessions.getRecentlyClosed", {}), filter)
+          : withCallback(native("sessions.getRecentlyClosed", { filter }), callback),
+      getDevices: (filter, callback) =>
+        withCallback(Promise.resolve([]), typeof filter === "function" ? filter : callback),
+      restore: (sessionId, callback) =>
+        typeof sessionId === "function" ? withCallback(restore(), sessionId) : withCallback(restore(sessionId), callback),
+      onChanged: dataEvent("sessions.onChanged"),
     });
   }
 

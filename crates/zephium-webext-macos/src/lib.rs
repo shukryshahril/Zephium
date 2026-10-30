@@ -25,6 +25,7 @@ mod notifications;
 mod offscreen;
 mod privacy;
 mod runtime;
+mod sessions;
 mod socket;
 mod surface;
 mod top_sites;

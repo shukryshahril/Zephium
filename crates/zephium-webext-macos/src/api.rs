@@ -18,6 +18,7 @@ pub const BROWSER_PERMISSIONS: &[&str] = &[
     "idle",
     "notifications",
     "privacy",
+    "sessions",
     "topSites",
     "webRequestAuthProvider",
 ];

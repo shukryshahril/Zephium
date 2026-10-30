@@ -10,7 +10,7 @@ use zephium_core::extension_data::{
 };
 
 use crate::runtime::Shared;
-use crate::{api, bookmarks, events, history, top_sites};
+use crate::{api, bookmarks, events, history, sessions, top_sites};
 
 pub(crate) type Done = Box<dyn FnOnce(Result<Value, String>)>;
 pub(crate) type Answer = Box<dyn FnOnce(ExtensionDataReply) -> Result<Value, String>>;
@@ -24,7 +24,7 @@ pub(crate) struct Call {
 }
 
 pub(crate) fn handles(api: &str) -> bool {
-    ["history.", "bookmarks.", "topSites."]
+    ["history.", "bookmarks.", "topSites.", "sessions."]
         .iter()
         .any(|namespace| api.starts_with(namespace))
 }
@@ -40,6 +40,7 @@ pub(crate) fn request(
         Some(("history", op)) => history::call(op, message),
         Some(("bookmarks", op)) => bookmarks::call(op, message),
         Some(("topSites", op)) => top_sites::call(op, message),
+        Some(("sessions", op)) => sessions::call(op, message),
         _ => Err(format!("{api} is not supported")),
     };
     let Call {
@@ -55,11 +56,15 @@ pub(crate) fn request(
             "The extension doesn't have the '{permission}' permission."
         )));
     }
+    let restoring = api == "sessions.restore";
     shared.host().browser_data(
         extension,
         request,
         Box::new(move |reply| {
             done(match reply {
+                ExtensionDataReply::Unavailable if restoring => {
+                    Err("No closed tab can be reopened in this window.".into())
+                }
                 ExtensionDataReply::Unavailable => {
                     Err("This profile keeps no such data, or it can't be reached now.".into())
                 }
@@ -85,6 +90,10 @@ pub(crate) fn changed(shared: &Rc<Shared>, change: ExtensionDataChange) {
             )],
         ),
         ExtensionDataChange::Bookmark(change) => (bookmarks::PERMISSION, bookmarks::events(change)),
+        ExtensionDataChange::Sessions => (
+            sessions::PERMISSION,
+            vec![(sessions::ON_CHANGED, json!([]))],
+        ),
     };
     let listening: Vec<String> = shared
         .loaded
@@ -114,6 +123,7 @@ pub(crate) fn refresh_interest(shared: &Shared) {
     let interest = ExtensionDataInterest {
         history: listens(shared, history::PERMISSION, history::EVENTS),
         bookmarks: listens(shared, bookmarks::PERMISSION, bookmarks::EVENTS),
+        sessions: listens(shared, sessions::PERMISSION, &[sessions::ON_CHANGED]),
     };
     if shared.data_interest.replace(interest) != interest {
         shared.host().data_interest(interest);

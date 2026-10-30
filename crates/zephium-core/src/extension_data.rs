@@ -9,6 +9,7 @@ pub const MAX_HISTORY_RESULTS: u32 = 1_000;
 /// Visits one address lists.
 pub const MAX_VISITS: u32 = 1_000;
 pub const MAX_TOP_SITES: u32 = 10;
+pub const MAX_CLOSED_TABS: u32 = 25;
 /// Addresses one removal names. Past it, listeners hear that all history
 /// went, which tells them to drop whatever they cached.
 pub const MAX_REMOVED_URLS: usize = 1_000;
@@ -39,6 +40,14 @@ pub struct VisitEntry {
 pub struct TopSite {
     pub url: String,
     pub title: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosedTab {
+    pub session: String,
+    pub url: String,
+    pub title: String,
+    pub closed_at_ms: Option<u64>,
 }
 
 /// Times are unix seconds; ranges include `start` and exclude `end`.
@@ -96,6 +105,14 @@ pub enum HistoryReply {
 pub enum ExtensionDataCall {
     History(HistoryRequest),
     Bookmarks(BookmarkRequest),
+    /// The profile's closed tabs, newest first.
+    RecentlyClosed {
+        limit: u32,
+    },
+    /// The named closed tab, or the newest.
+    Restore {
+        session: Option<String>,
+    },
 }
 
 impl ExtensionDataCall {
@@ -144,6 +161,8 @@ impl ExtensionDataCall {
                 | BookmarkRequest::Delete { .. } => true,
                 _ => false,
             },
+            Self::RecentlyClosed { .. } => true,
+            Self::Restore { session } => session.as_ref().is_none_or(|id| id.len() <= 64),
         }
     }
 }
@@ -152,6 +171,8 @@ impl ExtensionDataCall {
 pub enum ExtensionDataReply {
     History(HistoryReply),
     Bookmarks(BookmarkReply),
+    Closed(Vec<ClosedTab>),
+    Restored(ClosedTab),
     /// The profile keeps no such data: it is private, or its storage failed.
     Unavailable,
     /// Too many requests are already waiting.
@@ -162,8 +183,13 @@ pub enum ExtensionDataReply {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExtensionDataChange {
     Visited(HistoryEntry),
-    VisitsRemoved { urls: Vec<String>, all: bool },
+    VisitsRemoved {
+        urls: Vec<String>,
+        all: bool,
+    },
     Bookmark(BookmarkChange),
+    /// A tab was closed or reopened.
+    Sessions,
 }
 
 /// Which changes some extension in a profile listens to; the shell does the
@@ -172,10 +198,11 @@ pub enum ExtensionDataChange {
 pub struct ExtensionDataInterest {
     pub history: bool,
     pub bookmarks: bool,
+    pub sessions: bool,
 }
 
 impl ExtensionDataInterest {
     pub fn any(self) -> bool {
-        self.history || self.bookmarks
+        self.history || self.bookmarks || self.sessions
     }
 }

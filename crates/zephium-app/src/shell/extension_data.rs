@@ -1,12 +1,12 @@
-//! Extensions' browsing data. Store work runs on the store-read worker;
-//! changes reach the engine only for what some extension in the profile
-//! listens to.
+//! Extensions' history, bookmarks, top sites and closed tabs. Store work
+//! runs on the store-read worker; changes reach the engine only for what
+//! some extension in the profile listens to.
 
 use super::*;
 
 use crate::store_reads::{ExtensionDataWork, MAX_PENDING_EXTENSION_CALLS};
 use zephium_core::extension_data::{
-    ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
+    ClosedTab, ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
     HistoryReply, HistoryRequest,
 };
 use zephium_core::ports::engine::WebExtensionDataRequest;
@@ -71,6 +71,18 @@ impl Shell {
             return self.answer_extension_data(profile, request, ExtensionDataReply::Unavailable);
         }
         let work = match call {
+            ExtensionDataCall::RecentlyClosed { limit } => {
+                let closed = self.closed_tabs(profile).take(limit as usize).collect();
+                return self.answer_extension_data(
+                    profile,
+                    request,
+                    ExtensionDataReply::Closed(closed),
+                );
+            }
+            ExtensionDataCall::Restore { session } => {
+                let reply = self.extension_restore(profile, session.as_deref());
+                return self.answer_extension_data(profile, request, reply);
+            }
             ExtensionDataCall::History(HistoryRequest::Add { url }) => {
                 self.store.record_visit(profile, url.clone(), String::new());
                 self.extension_visit_recorded(profile, &url);
@@ -127,6 +139,7 @@ impl Shell {
                 interest.history
             }
             ExtensionDataChange::Bookmark(_) => interest.bookmarks,
+            ExtensionDataChange::Sessions => interest.sessions,
         };
         if heard
             && self.engine.web_extension_data_changed(profile, change) != NativeDispatch::Scheduled
@@ -146,6 +159,60 @@ impl Shell {
                 profile,
                 ExtensionDataWork::Visited(url.to_owned()),
             );
+        }
+    }
+
+    pub(super) fn extension_sessions_changed(&mut self, profile: ProfileId) {
+        self.on_extension_data_changed(profile, ExtensionDataChange::Sessions);
+    }
+
+    fn closed_tabs(&self, profile: ProfileId) -> impl Iterator<Item = ClosedTab> + '_ {
+        self.recently_closed
+            .iter()
+            .rev()
+            .filter(move |entry| entry.profile == profile)
+            .filter_map(|entry| {
+                Some(ClosedTab {
+                    session: entry.session_id?.to_string(),
+                    url: entry.url.clone(),
+                    title: entry.title.clone(),
+                    closed_at_ms: entry.closed_at_ms,
+                })
+            })
+    }
+
+    /// Reopens as the Reopen Closed Tab command does, in the focused window
+    /// of the extension's profile only.
+    fn extension_restore(
+        &mut self,
+        profile: ProfileId,
+        session: Option<&str>,
+    ) -> ExtensionDataReply {
+        let focused = self
+            .windows
+            .focused()
+            .is_some_and(|window| window.profile == profile);
+        let named = match session {
+            Some(id) => match zephium_core::ids::ClosedSessionId::parse(id) {
+                Some(id) => Some(id),
+                None => return ExtensionDataReply::Unavailable,
+            },
+            None => None,
+        };
+        let Some(closed) = self
+            .closed_tabs(profile)
+            .find(|tab| session.is_none_or(|id| tab.session == id))
+        else {
+            return ExtensionDataReply::Unavailable;
+        };
+        if !focused {
+            return ExtensionDataReply::Unavailable;
+        }
+        match self.operation_reopen_closed_tab(named).outcome {
+            OperationOutcome::Applied | OperationOutcome::Deferred => {
+                ExtensionDataReply::Restored(closed)
+            }
+            _ => ExtensionDataReply::Unavailable,
         }
     }
 

@@ -27,10 +27,15 @@
     "timeout": 8000
   },
   {
+    "eval": "const r = {}; r.closed = (await chrome.sessions.getRecentlyClosed()).map((s) => [s.tab.sessionId, s.tab.url, typeof s.lastModified]); r.one = (await chrome.sessions.getRecentlyClosed({ maxResults: 1 })).length; r.tooMany = await chrome.sessions.getRecentlyClosed({ maxResults: 26 }).catch((e) => e.message); const changed = new Promise((res) => chrome.sessions.onChanged.addListener(() => res('changed'))); await new Promise((res) => setTimeout(res, 400)); r.restored = (await chrome.sessions.restore('s1')).tab.url; r.changed = await changed; r.newest = await new Promise((res) => chrome.sessions.restore((session) => res(session.tab.sessionId))); r.gone = await chrome.sessions.restore('s1').catch((e) => e.message); r.devices = await chrome.sessions.getDevices(); return r;",
+    "in": "page",
+    "timeout": 8000
+  },
+  {
     "sleep": 500
   },
   {
-    "eval": "return ((await chrome.storage.local.get('seen')).seen || []).map((s) => [s.name, JSON.stringify(s.args[0]).slice(0, 60)]);",
+    "eval": "return ((await chrome.storage.local.get('seen')).seen || []).map((s) => [s.name, String(JSON.stringify(s.args[0])).slice(0, 60)]);",
     "in": "page"
   },
   {

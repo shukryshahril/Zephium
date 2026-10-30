@@ -132,3 +132,61 @@ fn visits_are_described_only_while_an_extension_listens() {
         .collect();
     assert_eq!(urls, ["https://heard.example/"]);
 }
+
+#[test]
+fn closed_tabs_list_newest_first_and_reopen_in_the_focused_window() {
+    let (mut shell, engine, screen, _, _) = browsed();
+    let profile = shell.windows.focused().unwrap().profile;
+    listen(
+        &mut shell,
+        profile,
+        ExtensionDataInterest {
+            sessions: true,
+            ..Default::default()
+        },
+    );
+    for host in ["first.example", "second.example"] {
+        let tab = visit(&mut shell, &screen, host);
+        shell.handle(Command::Close(tab));
+    }
+    assert_eq!(engine.extension_data_changes.lock().unwrap().len(), 2);
+
+    ask(
+        &mut shell,
+        profile,
+        1,
+        ExtensionDataCall::RecentlyClosed { limit: 1 },
+    );
+    ask(
+        &mut shell,
+        profile,
+        2,
+        ExtensionDataCall::Restore { session: None },
+    );
+    ask(
+        &mut shell,
+        profile,
+        3,
+        ExtensionDataCall::Restore {
+            session: Some("not-a-session".into()),
+        },
+    );
+    let answers = engine.extension_data_answers.lock().unwrap();
+    let ExtensionDataReply::Closed(closed) = &answers[0].2 else {
+        panic!("closed tabs: {answers:?}");
+    };
+    assert_eq!(closed.len(), 1);
+    assert_eq!(closed[0].url, "https://second.example/");
+    let ExtensionDataReply::Restored(restored) = &answers[1].2 else {
+        panic!("restored: {answers:?}");
+    };
+    assert_eq!(restored.session, closed[0].session);
+    assert_eq!(answers[2].2, ExtensionDataReply::Unavailable);
+    assert_eq!(shell.recently_closed.len(), 1);
+    assert!(engine
+        .extension_data_changes
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|(_, change)| *change == ExtensionDataChange::Sessions));
+}

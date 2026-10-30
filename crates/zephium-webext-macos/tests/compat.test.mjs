@@ -41,6 +41,10 @@ function context(kind, declared = []) {
             return message.id;
           case "idle.query":
             return message.interval >= 15 ? "active" : "invalid";
+          case "sessions.getRecentlyClosed":
+            return [{ lastModified: 1, tab: { sessionId: "s1", url: "https://a.example/", title: "A" } }];
+          case "sessions.restore":
+            return { lastModified: 1, tab: { sessionId: message.sessionId || "s1", url: "https://example.com/", title: "A" } };
           case "topSites.get":
             return [{ url: "https://a.example/", title: "A" }];
           case "bookmarks.create":
@@ -407,6 +411,23 @@ test("browser data namespaces exist only when declared and pass Chrome's argumen
     assert.equal(typeof chrome.history.onVisitRemoved.hasListeners, "function", kind);
   }
   assert.equal(context("content", ["history"]).chrome.history, undefined, "not in content scripts");
+});
+
+test("closed tabs restore as the active tab chrome.tabs describes", async () => {
+  assert.equal(context("page").chrome.sessions, undefined);
+  const { chrome } = context("page", ["sessions"]);
+  assert.equal((await chrome.sessions.getRecentlyClosed({ maxResults: 1 }))[0].tab.sessionId, "s1");
+  assert.equal(JSON.stringify(chrome.runtime.messages.at(-1)), JSON.stringify({ api: "sessions.getRecentlyClosed", filter: { maxResults: 1 } }));
+  let listed;
+  chrome.sessions.getRecentlyClosed((sessions) => (listed = sessions.length));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(listed, 1);
+  chrome.tabs.query = () => Promise.resolve([{ id: 7, url: "https://example.com/", title: "A", active: true }]);
+  const restored = await chrome.sessions.restore("s2");
+  assert.equal(restored.tab.id, 7);
+  assert.equal(chrome.runtime.messages.at(-1).sessionId, "s2");
+  assert.equal(JSON.stringify(await chrome.sessions.getDevices()), "[]");
+  assert.equal(typeof chrome.sessions.onChanged.addListener, "function");
 });
 
 test("top sites are read from the browser", async () => {

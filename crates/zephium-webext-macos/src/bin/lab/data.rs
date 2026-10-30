@@ -1,5 +1,5 @@
-//! The lab's stand-in for the browser's stores: a little history and a few
-//! bookmarks, kept in memory, answering as the shell does and raising the
+//! The lab's stand-in for the browser's stores: a little history, a few
+//! bookmarks and closed tabs, kept in memory, answering as the shell does and raising the
 //! changes it would.
 
 use std::cell::{Cell, RefCell};
@@ -8,7 +8,7 @@ use zephium_core::bookmarks::{
     BookmarkChange, BookmarkEntry, BookmarkFailure, BookmarkReply, BookmarkRequest,
 };
 use zephium_core::extension_data::{
-    ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
+    ClosedTab, ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
     HistoryEntry, HistoryReply, HistoryRequest, TopSite, VisitEntry,
 };
 
@@ -17,6 +17,8 @@ pub struct LabData {
     history: RefCell<Vec<HistoryEntry>>,
     /// In sibling order; places are counted when answering.
     bookmarks: RefCell<Vec<BookmarkEntry>>,
+    /// Newest first.
+    closed: RefCell<Vec<ClosedTab>>,
     next: Cell<i64>,
 }
 
@@ -41,6 +43,20 @@ impl Default for LabData {
                 mark(2, Some(1), "Guide", Some("https://docs.example/guide")),
                 mark(3, None, "News", Some("https://news.example/")),
             ]),
+            closed: RefCell::new(
+                [
+                    ("s2", "https://closed.example/two", "Two"),
+                    ("s1", "https://closed.example/one", "One"),
+                ]
+                .into_iter()
+                .map(|(session, url, title)| ClosedTab {
+                    session: session.into(),
+                    url: url.into(),
+                    title: title.into(),
+                    closed_at_ms: Some(1_700_000_000_000),
+                })
+                .collect(),
+            ),
             next: Cell::new(100),
         }
     }
@@ -72,6 +88,29 @@ impl LabData {
         println!("DATA {call:?}");
         match call {
             ExtensionDataCall::History(request) => self.history(request),
+            ExtensionDataCall::RecentlyClosed { limit } => {
+                let closed = self
+                    .closed
+                    .borrow()
+                    .iter()
+                    .take(limit as usize)
+                    .cloned()
+                    .collect();
+                (ExtensionDataReply::Closed(closed), None)
+            }
+            ExtensionDataCall::Restore { session } => {
+                let mut closed = self.closed.borrow_mut();
+                match closed
+                    .iter()
+                    .position(|tab| session.as_ref().is_none_or(|id| &tab.session == id))
+                {
+                    Some(at) => (
+                        ExtensionDataReply::Restored(closed.remove(at)),
+                        Some(ExtensionDataChange::Sessions),
+                    ),
+                    None => (ExtensionDataReply::Unavailable, None),
+                }
+            }
             ExtensionDataCall::Bookmarks(request) => {
                 let (reply, change) = self.bookmarks(request);
                 (
@@ -409,6 +448,7 @@ impl LabData {
                 interest.history
             }
             ExtensionDataChange::Bookmark(_) => interest.bookmarks,
+            ExtensionDataChange::Sessions => interest.sessions,
         }
     }
 }

@@ -81,9 +81,20 @@ function context(kind) {
       onBeforeRequest: {
         addListener(_listener, filter) {
           if (filter.urls.some((url) => url.startsWith("ws"))) throw new Error("invalid match pattern");
+          if ((filter.types || []).includes("webbundle")) throw new Error("invalid resource type");
           this.filters.push(filter.urls);
+          this.types.push(filter.types);
         },
         filters: [],
+        types: [],
+      },
+    },
+    contextMenus: {
+      created: [],
+      create(properties) {
+        if ((properties.documentUrlPatterns || []).some((pattern) => pattern.startsWith("ftp"))) throw new Error("invalid pattern");
+        this.created.push(properties);
+        return properties.id;
       },
     },
     declarativeNetRequest: {
@@ -98,6 +109,7 @@ function context(kind) {
       contains(request) {
         const unknown = (request.permissions || []).find((name) => name === "tabGroups");
         if (unknown) throw invalid(unknown);
+        if ((request.origins || []).some((origin) => /:\d+\//.test(origin))) throw new Error("invalid match pattern");
         return Promise.resolve(true);
       },
       request: () => Promise.resolve(true),
@@ -309,4 +321,15 @@ test("the API globals survive an extension hiding them", () => {
   vm.runInContext('"use strict"; for (const name of ["chrome", "browser"]) globalThis[name] = new Proxy({}, { get: () => undefined });', g);
   assert.equal(g.chrome, api);
   assert.equal(g.browser, api);
+});
+
+test("filters and patterns WebKit can't read are narrowed, not refused", async () => {
+  const { chrome } = context("worker");
+  chrome.webRequest.onBeforeRequest.addListener(() => {}, { urls: ["<all_urls>"], types: ["script", "webbundle"] });
+  assert.equal(JSON.stringify(chrome.webRequest.onBeforeRequest.types.at(-1)), JSON.stringify(["script"]));
+  chrome.contextMenus.create({ id: "m", documentUrlPatterns: ["https://*/*", "ftp://*/*"] });
+  assert.equal(JSON.stringify(chrome.contextMenus.created.at(-1).documentUrlPatterns), JSON.stringify(["https://*/*"]));
+  assert.equal(await chrome.permissions.contains({ origins: ["http://localhost:8080/*"] }), true);
+  assert.equal(chrome.declarativeNetRequest.RuleActionType.BLOCK, "block");
+  assert.equal(chrome.identity.AccountStatus.ANY, "ANY");
 });

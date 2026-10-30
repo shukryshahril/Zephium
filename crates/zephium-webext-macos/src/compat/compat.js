@@ -425,6 +425,11 @@
         const current = Object.assign({}, request);
         const requested = Array.isArray(current.permissions) ? current.permissions : [];
         const browserNames = requested.filter(browserManaged);
+        // WebKit refuses match patterns with a port; Chrome matches every port
+        // of a host either way.
+        if (Array.isArray(current.origins)) {
+          current.origins = current.origins.map((origin) => String(origin).replace(/^([^:]+:\/\/[^/:]+):\d+(\/|$)/, "$1$2"));
+        }
         let unknown = requested.some((name) => unknownNames.has(name));
         current.permissions = requested.filter((name) => !unknownNames.has(name) && !browserManaged(name));
         let result;
@@ -586,6 +591,7 @@
   if (!isContent) {
     const identity = namespace("identity");
     const target = identity || {};
+    if (!target.AccountStatus) pin(target, "AccountStatus", Object.freeze({ SYNC: "SYNC", ANY: "ANY" }));
     if (typeof target.launchWebAuthFlow !== "function") {
       pin(target, "getRedirectURL", (path) =>
         `https://${runtime.id}.chromiumapp.org/${String(path || "").replace(/^\//, "")}`,
@@ -867,10 +873,16 @@
       const add = event.addListener;
       pin(event, "addListener", function (listener, filter, ...rest) {
         const urls = filter && Array.isArray(filter.urls) ? filter.urls : null;
-        if (!urls || !urls.some((url) => socket.test(url))) return add.call(this, listener, filter, ...rest);
-        const usable = urls.filter((url) => !socket.test(url));
-        if (usable.length === 0) return undefined;
-        return add.call(this, listener, Object.assign({}, filter, { urls: usable }), ...rest);
+        const types = filter && Array.isArray(filter.types) ? filter.types : null;
+        const unknownType = (type) => type === "webbundle" || type === "webtransport";
+        if ((!urls || !urls.some((url) => socket.test(url))) && (!types || !types.some(unknownType))) {
+          return add.call(this, listener, filter, ...rest);
+        }
+        const usable = urls ? urls.filter((url) => !socket.test(url)) : urls;
+        const known = types ? types.filter((type) => !unknownType(type)) : types;
+        if ((usable && usable.length === 0) || (known && known.length === 0)) return undefined;
+        const narrowed = Object.assign({}, filter, usable ? { urls: usable } : {}, known ? { types: known } : {});
+        return add.call(this, listener, narrowed, ...rest);
       });
     }
   }
@@ -878,6 +890,18 @@
   // WebKit rejects a whole rule update over one rule it can't apply, such as
   // one setting a header it doesn't know. Chrome would apply the rest.
   const netRequest = !isContent && namespace("declarativeNetRequest");
+  constants(netRequest, {
+    RuleActionType: { BLOCK: "block", REDIRECT: "redirect", ALLOW: "allow", UPGRADE_SCHEME: "upgradeScheme", MODIFY_HEADERS: "modifyHeaders", ALLOW_ALL_REQUESTS: "allowAllRequests" },
+    ResourceType: {
+      MAIN_FRAME: "main_frame", SUB_FRAME: "sub_frame", STYLESHEET: "stylesheet", SCRIPT: "script", IMAGE: "image", FONT: "font",
+      OBJECT: "object", XMLHTTPREQUEST: "xmlhttprequest", PING: "ping", CSP_REPORT: "csp_report", MEDIA: "media",
+      WEBSOCKET: "websocket", WEBTRANSPORT: "webtransport", WEBBUNDLE: "webbundle", OTHER: "other",
+    },
+    RequestMethod: { CONNECT: "connect", DELETE: "delete", GET: "get", HEAD: "head", OPTIONS: "options", PATCH: "patch", POST: "post", PUT: "put", OTHER: "other" },
+    DomainType: { FIRST_PARTY: "firstParty", THIRD_PARTY: "thirdParty" },
+    HeaderOperation: { APPEND: "append", SET: "set", REMOVE: "remove" },
+    UnsupportedRegexReason: { SYNTAX_ERROR: "syntaxError", MEMORY_LIMIT_EXCEEDED: "memoryLimitExceeded" },
+  });
   if (netRequest) {
     const rejected = /rule at index (\d+)/;
     for (const method of ["updateSessionRules", "updateDynamicRules"]) {
@@ -911,6 +935,32 @@
   if (action && typeof action.getUserSettings !== "function") {
     pin(action, "getUserSettings", (callback) => withCallback(Promise.resolve({ isOnToolbar: true }), callback));
     if (!action.onUserSettingsChanged) pin(action, "onUserSettingsChanged", makeEvent());
+  }
+
+  // WebKit rejects a menu item whose URL patterns name ftp://; such pages
+  // never load here, so those patterns are dropped.
+  for (const name of ["contextMenus", "menus"]) {
+    const menus = !isContent && namespace(name);
+    if (!menus) continue;
+    const clean = (properties) => {
+      if (!properties || typeof properties !== "object") return properties;
+      const next = Object.assign({}, properties);
+      for (const key of ["documentUrlPatterns", "targetUrlPatterns"]) {
+        if (!Array.isArray(next[key]) || !next[key].some((pattern) => /^ftp:/i.test(pattern))) continue;
+        const kept = next[key].filter((pattern) => !/^ftp:/i.test(pattern));
+        next[key] = kept.length ? kept : ["https://ftp.invalid/*"];
+      }
+      return next;
+    };
+    for (const method of ["create", "update"]) {
+      const original = menus[method];
+      if (typeof original !== "function") continue;
+      pin(menus, method, function (...args) {
+        const at = method === "create" ? 0 : 1;
+        args[at] = clean(args[at]);
+        return original.apply(menus, args);
+      });
+    }
   }
 
   // Only normal and popup windows exist here; Chrome answers other types

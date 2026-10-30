@@ -62,7 +62,7 @@ impl Drop for Preparing {
     }
 }
 
-const MAX_PACKAGE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 
 mod platform;
 use platform::{compat_revision, prepare_package};

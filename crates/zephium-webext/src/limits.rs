@@ -69,11 +69,6 @@ const GAPS: &[(&[Uses], &str, u8)] = &[
         MAC,
     ),
     (
-        &[Permission("notifications")],
-        "Can't show notifications",
-        MAC,
-    ),
-    (
         &[Permission("history")],
         "Can't read your browsing history",
         MAC,
@@ -227,7 +222,6 @@ mod tests {
             assess(raw.clone(), Platform::Macos),
             [
                 "Can't supply logins for websites' sign-in prompts",
-                "Can't show notifications",
                 "Can only change password and autofill privacy settings",
             ]
         );

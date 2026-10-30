@@ -346,6 +346,8 @@ export const commands = {
 	version: string,
 	description: string,
 	warnings: string[],
+	/**  What this browser can't do for the extension, apart from its access. */
+	limitations: string[],
 	icon: string | null,
 	update: boolean,
 	/**  Installed from a file, so not checked against the Web Store. */
@@ -3509,6 +3511,8 @@ export type WebExtensionReview = {
 	version: string,
 	description: string,
 	warnings: string[],
+	/**  What this browser can't do for the extension, apart from its access. */
+	limitations: string[],
 	icon: string | null,
 	update: boolean,
 	/**  Installed from a file, so not checked against the Web Store. */
@@ -3528,6 +3532,7 @@ export type WebExtensionView = {
 	state: string,
 	error: string | null,
 	warnings: string[],
+	limitations: string[],
 	/**  `all`, `click` or `sites`; meaningful only when `site_scoped`. */
 	access: string,
 	sites: string[],

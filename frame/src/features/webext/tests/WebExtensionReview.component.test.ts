@@ -26,6 +26,7 @@ const review: Review = {
   version: "1.0",
   description: "",
   warnings: [],
+  limitations: [],
   icon: null,
   update: false,
   from_file: false,
@@ -41,4 +42,23 @@ test("Escape cancels only the displayed review", async () => {
   render(WebExtensionReview, { review });
   await userEvent.keyboard("{Escape}");
   expect(actions.cancel).toHaveBeenCalledExactlyOnceWith("displayed-review");
+});
+
+test("limitations are listed apart from the access it asks for", async () => {
+  render(WebExtensionReview, {
+    review: {
+      ...review,
+      warnings: ["Manage your downloads"],
+      limitations: ["Can't show its side panel"],
+    },
+  });
+  await expect.element(page.getByText("Some features may not work in Zephium")).toBeVisible();
+  await expect.element(page.getByText("Can't show its side panel")).toBeVisible();
+});
+
+test("no limitations adds no section", async () => {
+  render(WebExtensionReview, { review });
+  await expect
+    .element(page.getByText("Some features may not work in Zephium"))
+    .not.toBeInTheDocument();
 });

@@ -2928,6 +2928,8 @@
   "webext_review_no_access": "不需要特殊存取權限。",
   "webext_review_more": "以及另外 {count} 個",
   "webext_review_less": "收合",
+  "webext_review_limits": "部分功能在 Zephium 中可能無法使用",
+  "webext_limits_short": "部分功能無法使用",
   "webext_review_cancel": "取消",
   "webext_review_add": "加入",
   "webext_review_update": "更新",

@@ -17,6 +17,7 @@ use std::time::Duration;
 use zephium_app::{Handle, WebExtensionStatus};
 use zephium_core::ids::{ExtensionInstallId, ItemId, ProfileId};
 use zephium_core::ports::engine::WebExtensionLoad;
+use zephium_webext::limits::{self, Platform};
 use zephium_webext::manifest::Manifest;
 use zephium_webext::{archive, crx, permissions, ExtensionId};
 
@@ -633,6 +634,12 @@ pub(in crate::webext) async fn list(
                 .as_ref()
                 .map(permissions::warnings)
                 .unwrap_or_default();
+            let limitations = manifest
+                .as_ref()
+                .map(|manifest| {
+                    limits::limitations(manifest, &entry.reviewed_permissions, platform())
+                })
+                .unwrap_or_default();
             let has_options = manifest.as_ref().is_some_and(|manifest| {
                 let raw = manifest.raw();
                 raw.get("options_page").is_some()
@@ -658,6 +665,7 @@ pub(in crate::webext) async fn list(
                 state: state.to_owned(),
                 error,
                 warnings,
+                limitations,
                 access: access.to_owned(),
                 sites,
                 site_scoped: !entry.hosts.is_empty(),
@@ -667,6 +675,14 @@ pub(in crate::webext) async fn list(
             }
         })
         .collect())
+}
+
+fn platform() -> Platform {
+    if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else {
+        Platform::Macos
+    }
 }
 
 fn extension_state(

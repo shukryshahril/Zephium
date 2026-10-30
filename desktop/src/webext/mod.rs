@@ -118,6 +118,8 @@ pub(crate) struct WebExtensionReview {
     version: String,
     description: String,
     warnings: Vec<String>,
+    /// What this browser can't do for the extension, apart from its access.
+    limitations: Vec<String>,
     icon: Option<String>,
     update: bool,
     /// Installed from a file, so not checked against the Web Store.
@@ -138,6 +140,7 @@ pub(crate) struct WebExtensionView {
     state: String,
     error: Option<String>,
     warnings: Vec<String>,
+    limitations: Vec<String>,
     /// `all`, `click` or `sites`; meaningful only when `site_scoped`.
     access: String,
     sites: Vec<String>,

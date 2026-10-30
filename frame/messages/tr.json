@@ -2928,6 +2928,8 @@
   "webext_review_no_access": "Özel bir erişim gerektirmez.",
   "webext_review_more": "ve {count} tane daha",
   "webext_review_less": "Daha az göster",
+  "webext_review_limits": "Bazı özellikler Zephium'da çalışmayabilir",
+  "webext_limits_short": "Bazı özellikler kullanılamıyor",
   "webext_review_cancel": "İptal",
   "webext_review_add": "Ekle",
   "webext_review_update": "Güncelle",

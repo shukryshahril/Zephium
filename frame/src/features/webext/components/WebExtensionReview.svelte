@@ -61,6 +61,14 @@
         </button>
       {/if}
     {/if}
+    {#if review.limitations.length > 0}
+      <div class="limits">
+        <p>{m.webext_review_limits()}</p>
+        <ul>
+          {#each review.limitations as limitation (limitation)}<li>{limitation}</li>{/each}
+        </ul>
+      </div>
+    {/if}
     {#if review.from_file}<p class="warning">{m.webext_from_file()}</p>{/if}
   </div>
 
@@ -141,6 +149,14 @@
     margin: 6px 0 0;
     padding-inline-start: 16px;
     color: var(--color-muted);
+  }
+
+  .limits {
+    margin-block-start: 10px;
+  }
+
+  .limits p {
+    color: var(--color-label-secondary);
   }
 
   .more {

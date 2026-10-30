@@ -2928,6 +2928,8 @@
   "webext_review_no_access": "Não precisa de acesso especial.",
   "webext_review_more": "e mais {count}",
   "webext_review_less": "Mostrar menos",
+  "webext_review_limits": "Alguns recursos podem não funcionar no Zephium",
+  "webext_limits_short": "Alguns recursos indisponíveis",
   "webext_review_cancel": "Cancelar",
   "webext_review_add": "Adicionar",
   "webext_review_update": "Atualizar",

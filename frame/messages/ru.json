@@ -2928,6 +2928,8 @@
   "webext_review_no_access": "Не требует особого доступа.",
   "webext_review_more": "и еще {count}",
   "webext_review_less": "Свернуть",
+  "webext_review_limits": "Некоторые функции могут не работать в Zephium",
+  "webext_limits_short": "Некоторые функции недоступны",
   "webext_review_cancel": "Отмена",
   "webext_review_add": "Добавить",
   "webext_review_update": "Обновить",

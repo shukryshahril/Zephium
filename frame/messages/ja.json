@@ -2928,6 +2928,8 @@
   "webext_review_no_access": "特別なアクセス権は不要です。",
   "webext_review_more": "ほか {count} 件",
   "webext_review_less": "表示を減らす",
+  "webext_review_limits": "Zephium では一部の機能が動作しない場合があります",
+  "webext_limits_short": "一部の機能は利用できません",
   "webext_review_cancel": "キャンセル",
   "webext_review_add": "追加",
   "webext_review_update": "アップデート",

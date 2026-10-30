@@ -10,6 +10,9 @@ use std::time::Instant;
 
 use zephium_core::bookmarks::{BookmarkFailure, BookmarkNode, BookmarkReply, BookmarkRequest};
 use zephium_core::export::{ExportKind, HISTORY_CSV_HEADER, MAX_EXPORT_VISITS};
+use zephium_core::extension_data::{
+    ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply, HistoryReply, HistoryRequest,
+};
 use zephium_core::ids::{ItemId, ProfileId, SpaceId};
 use zephium_core::item::sanitize_page_title;
 use zephium_core::ports::store::HistoryHit;
@@ -21,6 +24,9 @@ const MAX_PENDING_FAVICON_READS: usize = 64;
 const MAX_PENDING_FAVICON_PROBE_READS: usize = 8;
 /// Pending history and bookmark surface calls, together.
 const MAX_PENDING_SURFACE_CALLS: usize = 8;
+/// Pending extension calls and event lookups, apart from the surfaces' so
+/// extensions can never crowd out the person's own requests.
+pub(crate) const MAX_PENDING_EXTENSION_CALLS: usize = 16;
 const MAX_SEARCH_QUERY_BYTES: usize = 4 * 1024;
 pub(crate) const FAVICON_CACHE_MAX_AGE_SECONDS: i64 = 7 * 24 * 3600;
 
@@ -160,6 +166,23 @@ pub enum StoreReadResult {
         token: u64,
         text: Option<String>,
     },
+    ExtensionData {
+        token: u64,
+        reply: ExtensionDataReply,
+    },
+    /// What a write changed, for the extensions listening to it.
+    ExtensionDataChanged {
+        profile: ProfileId,
+        change: ExtensionDataChange,
+    },
+}
+
+/// What an extension asks of the store, or a lookup an event needs.
+#[derive(Clone, Debug)]
+pub enum ExtensionDataWork {
+    History(HistoryRequest),
+    /// The address just visited, for `history.onVisited`.
+    Visited(String),
 }
 
 /// Data read from another browser. Bookmarks and history are written in one
@@ -249,6 +272,11 @@ enum Request {
         profile: ProfileId,
         kind: ExportKind,
     },
+    ExtensionData {
+        token: u64,
+        profile: ProfileId,
+        work: ExtensionDataWork,
+    },
 }
 
 struct State {
@@ -261,6 +289,8 @@ struct State {
     favicons: HashMap<ItemId, Request>,
     favicon_order: VecDeque<ItemId>,
     favicon_probes: VecDeque<Request>,
+    extension_calls: VecDeque<Request>,
+    interest: HashMap<ProfileId, ExtensionDataInterest>,
 }
 
 impl Default for State {
@@ -275,6 +305,8 @@ impl Default for State {
             favicons: HashMap::new(),
             favicon_order: VecDeque::new(),
             favicon_probes: VecDeque::new(),
+            extension_calls: VecDeque::new(),
+            interest: HashMap::new(),
         }
     }
 }
@@ -434,6 +466,57 @@ impl StoreReadQueue {
         });
         self.inner.ready.notify_one();
         true
+    }
+
+    pub(crate) fn request_extension_data(
+        &self,
+        token: u64,
+        profile: ProfileId,
+        work: ExtensionDataWork,
+    ) -> bool {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.stopped
+            || !state.accepting
+            || state.extension_calls.len() >= MAX_PENDING_EXTENSION_CALLS
+        {
+            return false;
+        }
+        state.extension_calls.push_back(Request::ExtensionData {
+            token,
+            profile,
+            work,
+        });
+        self.inner.ready.notify_one();
+        true
+    }
+
+    /// Which changes the worker describes for a profile's extensions.
+    pub(crate) fn set_interest(&self, profile: ProfileId, interest: ExtensionDataInterest) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if interest.any() {
+            state.interest.insert(profile, interest);
+        } else {
+            state.interest.remove(&profile);
+        }
+    }
+
+    fn interest(&self, profile: ProfileId) -> ExtensionDataInterest {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .interest
+            .get(&profile)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub(crate) fn request_favicon(
@@ -598,6 +681,7 @@ impl StoreReadQueue {
         state.accepting = false;
         state.history = None;
         state.surface_calls.clear();
+        state.extension_calls.clear();
         state.favicon_batch = None;
         state.favicons.clear();
         state.favicon_order.clear();
@@ -642,6 +726,7 @@ impl StoreReadQueue {
         state.accepting = false;
         state.history = None;
         state.surface_calls.clear();
+        state.extension_calls.clear();
         state.favicon_batch = None;
         state.favicons.clear();
         state.favicon_order.clear();
@@ -655,6 +740,7 @@ fn pop_browser_read(state: &mut State) -> Option<Request> {
         .history
         .take()
         .or_else(|| state.surface_calls.pop_front())
+        .or_else(|| state.extension_calls.pop_front())
         .or_else(|| state.favicon_batch.take())
         .or_else(|| {
             while let Some(id) = state.favicon_order.pop_front() {
@@ -769,6 +855,7 @@ fn bookmark_work(
     work: BookmarkWork,
 ) -> BookmarkSurfaceReply {
     use zephium_ipc::{bookmark_id, BookmarkCall};
+    let write = |request: BookmarkRequest| store.bookmarks(profile, request);
     let nodes = |reply: BookmarkReply| match reply {
         BookmarkReply::Nodes(nodes) => Ok(nodes),
         BookmarkReply::Failed(failure) => Err(failure),
@@ -793,15 +880,13 @@ fn bookmark_work(
     let id = |id: String| bookmark_id(&id).ok_or(BookmarkFailure::Missing);
     let call = match work {
         BookmarkWork::AddPage { url, title } => {
-            return saved(store.bookmarks(
-                profile,
-                BookmarkRequest::AddLink {
-                    parent: None,
-                    title,
-                    url,
-                    if_absent: true,
-                },
-            ))
+            let reply = saved(write(BookmarkRequest::AddLink {
+                parent: None,
+                title,
+                url,
+                if_absent: true,
+            }));
+            return reply;
         }
         BookmarkWork::Surface(call) => call,
     };
@@ -836,9 +921,9 @@ fn bookmark_work(
             nodes(store.bookmarks(profile, BookmarkRequest::Search { query }))
                 .map(BookmarkSurfaceReply::Results)
         }
-        BookmarkCall::AddFolder { parent: at, title } => parent(at).map(|parent| {
-            saved(store.bookmarks(profile, BookmarkRequest::AddFolder { parent, title }))
-        }),
+        BookmarkCall::AddFolder { parent: at, title } => {
+            parent(at).map(|parent| saved(write(BookmarkRequest::AddFolder { parent, title })))
+        }
         BookmarkCall::AddLink {
             parent: at,
             title,
@@ -851,29 +936,25 @@ fn bookmark_work(
             } else {
                 title
             };
-            Ok(saved(store.bookmarks(
-                profile,
-                BookmarkRequest::AddLink {
-                    parent,
-                    title,
-                    url: url.to_string(),
-                    if_absent: false,
-                },
-            )))
+            Ok(saved(write(BookmarkRequest::AddLink {
+                parent,
+                title,
+                url: url.to_string(),
+                if_absent: false,
+            })))
         }),
-        BookmarkCall::Rename { id: target, title } => id(target)
-            .map(|id| saved(store.bookmarks(profile, BookmarkRequest::Rename { id, title }))),
+        BookmarkCall::Rename { id: target, title } => {
+            id(target).map(|id| saved(write(BookmarkRequest::Rename { id, title })))
+        }
         BookmarkCall::Move {
             id: target,
             parent: at,
             index,
         } => id(target).and_then(|id| {
-            parent(at).map(|parent| {
-                saved(store.bookmarks(profile, BookmarkRequest::Move { id, parent, index }))
-            })
+            parent(at).map(|parent| saved(write(BookmarkRequest::Move { id, parent, index })))
         }),
         BookmarkCall::Remove { id: target } => {
-            id(target).map(|id| saved(store.bookmarks(profile, BookmarkRequest::Remove { id })))
+            id(target).map(|id| saved(write(BookmarkRequest::Remove { id })))
         }
     };
     result.unwrap_or_else(BookmarkSurfaceReply::Failed)
@@ -942,6 +1023,7 @@ fn run_with(
         let Some(request) = lease.take() else {
             continue;
         };
+        let mut change = None;
         let result = match request {
             Request::History {
                 generation,
@@ -989,13 +1071,21 @@ fn run_with(
                 }
                 zephium_ipc::HistoryCall::Forget { urls } => {
                     match store.forget_history_urls_checked(profile, &urls) {
-                        Some(removed) => StoreReadResult::HistorySurface {
-                            token,
-                            profile,
-                            visits: Vec::new(),
-                            next: None,
-                            removed: Some(removed),
-                        },
+                        Some(removed) => {
+                            if queue.interest(profile).history {
+                                change = Some((
+                                    profile,
+                                    ExtensionDataChange::VisitsRemoved { urls, all: false },
+                                ));
+                            }
+                            StoreReadResult::HistorySurface {
+                                token,
+                                profile,
+                                visits: Vec::new(),
+                                next: None,
+                                removed: Some(removed),
+                            }
+                        }
                         None => StoreReadResult::HistorySurfaceFailed { token, profile },
                     }
                 }
@@ -1009,13 +1099,33 @@ fn run_with(
                         _ => unreachable!(),
                     };
                     store.clear_chats(profile, since);
+                    // Listeners hear which addresses went: the visits since
+                    // `since` are taken first, naming them, and the clear
+                    // takes the rest of what the range holds.
+                    let mut taken = 0;
+                    if queue.interest(profile).history {
+                        let request = match since {
+                            Some(since) => HistoryRequest::RemoveRange {
+                                start: since,
+                                end: i64::MAX,
+                            },
+                            None => HistoryRequest::RemoveAll,
+                        };
+                        if let HistoryReply::Removed { visits, urls, all } =
+                            store.extension_history(profile, request)
+                        {
+                            taken = visits;
+                            change =
+                                Some((profile, ExtensionDataChange::VisitsRemoved { urls, all }));
+                        }
+                    }
                     match store.clear_history_checked(profile, since) {
                         Some(removed) => StoreReadResult::HistorySurface {
                             token,
                             profile,
                             visits: Vec::new(),
                             next: None,
-                            removed: Some(removed),
+                            removed: Some(removed.saturating_add(taken)),
                         },
                         None => StoreReadResult::HistorySurfaceFailed { token, profile },
                     }
@@ -1062,6 +1172,16 @@ fn run_with(
                 token,
                 text: export_text(&*store, profile, kind),
             },
+            Request::ExtensionData {
+                token,
+                profile,
+                work,
+            } => {
+                let interest = queue.interest(profile);
+                let (reply, made) = extension_work(&*store, profile, work, interest);
+                change = made.map(|made| (profile, made));
+                StoreReadResult::ExtensionData { token, reply }
+            }
             Request::Favicon {
                 generation,
                 id,
@@ -1116,6 +1236,44 @@ fn run_with(
             }
         };
         let _ = deliver(result);
+        if let Some((profile, change)) = change {
+            let _ = deliver(StoreReadResult::ExtensionDataChanged { profile, change });
+        }
+    }
+}
+
+/// An extension's request, with what it changed when someone listens.
+fn extension_work(
+    store: &dyn zephium_core::ports::store::Store,
+    profile: ProfileId,
+    work: ExtensionDataWork,
+    interest: ExtensionDataInterest,
+) -> (ExtensionDataReply, Option<ExtensionDataChange>) {
+    match work {
+        ExtensionDataWork::History(request) => {
+            let reply = store.extension_history(profile, request);
+            let change = match &reply {
+                HistoryReply::Removed { visits, urls, all }
+                    if interest.history && (*visits > 0 || *all) =>
+                {
+                    Some(ExtensionDataChange::VisitsRemoved {
+                        urls: urls.clone(),
+                        all: *all,
+                    })
+                }
+                _ => None,
+            };
+            (ExtensionDataReply::History(reply), change)
+        }
+        ExtensionDataWork::Visited(url) => {
+            let change = match store.extension_history(profile, HistoryRequest::Address { url }) {
+                HistoryReply::Entries(entries) if interest.history => {
+                    entries.into_iter().next().map(ExtensionDataChange::Visited)
+                }
+                _ => None,
+            };
+            (ExtensionDataReply::Unavailable, change)
+        }
     }
 }
 

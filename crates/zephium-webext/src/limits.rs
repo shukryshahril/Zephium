@@ -64,11 +64,6 @@ const GAPS: &[(&[Uses], &str, u8)] = &[
         MAC,
     ),
     (
-        &[Permission("history")],
-        "Can't read your browsing history",
-        MAC,
-    ),
-    (
         &[Permission("bookmarks")],
         "Can't read or change your bookmarks",
         MAC,
@@ -257,7 +252,7 @@ mod tests {
     fn declared_pages_and_old_style_blocking_are_named() {
         let raw = json!({
             "manifest_version": 2,
-            "permissions": ["webRequest", "webRequestBlocking", "history", "system.cpu", "<all_urls>"],
+            "permissions": ["webRequest", "webRequestBlocking", "tabGroups", "system.cpu", "<all_urls>"],
             "devtools_page": "devtools.html",
             "chrome_url_overrides": {"newtab": "tab.html"}
         });
@@ -267,7 +262,7 @@ mod tests {
                 "Developer tools panels aren't available",
                 "Can't replace the new tab page",
                 "Can't block requests the old way (webRequestBlocking)",
-                "Can't read your browsing history",
+                "Can't manage tab groups",
                 "Can't read system information",
             ]
         );
@@ -278,6 +273,12 @@ mod tests {
                 "Can't replace the new tab page"
             ]
         );
+    }
+
+    #[test]
+    fn browser_data_the_browser_keeps_is_not_named() {
+        let raw = json!({"manifest_version": 3, "permissions": ["history"]});
+        assert!(assess(raw, Platform::Macos).is_empty());
     }
 
     #[test]

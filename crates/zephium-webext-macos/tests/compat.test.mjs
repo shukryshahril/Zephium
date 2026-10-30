@@ -8,7 +8,7 @@ import vm from "node:vm";
 const source = readFileSync(new URL("../src/compat/compat.js", import.meta.url), "utf8");
 const event = () => ({ addListener() {}, removeListener() {}, hasListener: () => false });
 
-function context(kind) {
+function context(kind, declared = []) {
   const invalid = (name) => new Error(`Invalid call. The 'permissions' value is invalid, because '${name}' is not a valid permission.`);
   const chrome = {
     runtime: {
@@ -18,6 +18,7 @@ function context(kind) {
       settings: {},
       async sendNativeMessage(_app, message) {
         this.sent.push(message.api);
+        this.messages.push(message);
         switch (message.api) {
           case "trace":
             return false;
@@ -40,10 +41,13 @@ function context(kind) {
             return message.id;
           case "idle.query":
             return message.interval >= 15 ? "active" : "invalid";
+          case "history.search":
+            return [{ id: "1", url: "https://a.example/", title: "A", lastVisitTime: 1, visitCount: 1, typedCount: 0 }];
           default:
             return null;
         }
       },
+      messages: [],
       ports: [],
       connectNative(application) {
         const listeners = new Set();
@@ -70,7 +74,7 @@ function context(kind) {
       getManifest: () => ({
         name: "__MSG_name__",
         version: "1.2",
-        permissions: ["tabs", "https://a.test/*", "privacy", "notifications", "offscreen"],
+        permissions: ["tabs", "https://a.test/*", "privacy", "notifications", "offscreen", ...declared],
         optional_permissions: ["idle"],
         options_page: "options.html",
       }),
@@ -378,4 +382,25 @@ test("network rule updates keep what WebKit can apply", async () => {
   assert.equal(JSON.stringify(await net.getDisabledRuleIds({ rulesetId: "a" })), "[]");
   await net.updateStaticRules({ rulesetId: "a", enableRuleIds: [] });
   await assert.rejects(net.updateStaticRules({ rulesetId: "a", disableRuleIds: [1] }), /not supported/);
+});
+
+test("browser data namespaces exist only when declared and pass Chrome's arguments through", async () => {
+  const plain = context("worker");
+  assert.equal(plain.chrome.history, undefined);
+  for (const kind of ["page", "worker"]) {
+    const { chrome } = context(kind, ["history"]);
+    assert.equal(chrome.history.TransitionType.LINK, "link", kind);
+    const found = await chrome.history.search({ text: "a", maxResults: 5 });
+    assert.equal(found[0].url, "https://a.example/", kind);
+    const sent = chrome.runtime.messages.at(-1);
+    assert.equal(JSON.stringify(sent), JSON.stringify({ api: "history.search", details: { text: "a", maxResults: 5 } }), kind);
+    let called = false;
+    chrome.history.deleteAll(() => (called = true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(called, kind);
+    assert.equal(chrome.runtime.messages.at(-1).api, "history.deleteAll", kind);
+    assert.equal(typeof chrome.history.onVisited.addListener, "function", kind);
+    assert.equal(typeof chrome.history.onVisitRemoved.hasListeners, "function", kind);
+  }
+  assert.equal(context("content", ["history"]).chrome.history, undefined, "not in content scripts");
 });

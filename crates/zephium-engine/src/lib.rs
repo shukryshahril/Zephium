@@ -1121,7 +1121,11 @@ impl RetirementGate {
             | event @ EngineEvent::ExtensionPageClosed { .. }
             | event @ EngineEvent::PermissionRequested { .. }
             | event @ EngineEvent::WebExtensionAccessRequested(_)
-            | event @ EngineEvent::WebExtensionAccessRemoved(_) => Some(event),
+            | event @ EngineEvent::WebExtensionAccessRemoved(_)
+            | event @ EngineEvent::WebExtensionDataRequested(_) => Some(event),
+            event @ EngineEvent::WebExtensionDataInterest { profile, .. } => {
+                self.profile_is_active(profile).then_some(event)
+            }
             EngineEvent::WebExtensionSettled {
                 profile,
                 install,
@@ -2601,6 +2605,31 @@ impl Engine for WebviewEngine {
             host::best_effort_with(move |host| {
                 host.answer_web_extension_access(profile, request, allowed)
             });
+        }))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn answer_web_extension_data(
+        &self,
+        profile: ProfileId,
+        request: u64,
+        reply: zephium_core::extension_data::ExtensionDataReply,
+    ) -> NativeDispatch {
+        NativeDispatch::from_scheduled(self.run(move || {
+            host::best_effort_with(move |host| {
+                host.answer_web_extension_data(profile, request, reply)
+            });
+        }))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn web_extension_data_changed(
+        &self,
+        profile: ProfileId,
+        change: zephium_core::extension_data::ExtensionDataChange,
+    ) -> NativeDispatch {
+        NativeDispatch::from_scheduled(self.run(move || {
+            host::best_effort_with(move |host| host.web_extension_data_changed(profile, change));
         }))
     }
 

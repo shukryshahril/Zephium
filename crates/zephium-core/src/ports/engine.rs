@@ -1017,6 +1017,24 @@ pub trait Engine {
     fn remove_web_extension(&self, _profile: ProfileId, _load: WebExtensionLoad) -> NativeDispatch {
         NativeDispatch::Unsupported
     }
+    /// Settles a [`EngineEvent::WebExtensionDataRequested`].
+    fn answer_web_extension_data(
+        &self,
+        _profile: ProfileId,
+        _request: u64,
+        _reply: crate::extension_data::ExtensionDataReply,
+    ) -> NativeDispatch {
+        NativeDispatch::Unsupported
+    }
+    /// Tells the profile's extensions what changed in its data; sent only
+    /// for what [`EngineEvent::WebExtensionDataInterest`] said they hear.
+    fn web_extension_data_changed(
+        &self,
+        _profile: ProfileId,
+        _change: crate::extension_data::ExtensionDataChange,
+    ) -> NativeDispatch {
+        NativeDispatch::Unsupported
+    }
     /// Requests one complete effective toolbar-action cohort for the exact
     /// published logical tab generation. The terminal result arrives as
     /// [`EngineEvent::ExtensionActionsSnapshotSettled`]. This query may read
@@ -1359,6 +1377,13 @@ pub struct WebExtensionAccessRequest {
     pub patterns: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebExtensionDataRequest {
+    pub profile: ProfileId,
+    pub request: u64,
+    pub call: crate::extension_data::ExtensionDataCall,
+}
+
 /// Access an extension gave up itself (`permissions.remove`), so it is not
 /// granted again when the extension next starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1474,6 +1499,14 @@ pub enum EngineEvent {
     /// answered through [`EnginePort::answer_web_extension_access`].
     WebExtensionAccessRequested(Box<WebExtensionAccessRequest>),
     WebExtensionAccessRemoved(Box<WebExtensionAccessRemoval>),
+    /// An extension asked for the profile's history, bookmarks or closed
+    /// tabs; answered through [`EnginePort::answer_web_extension_data`].
+    WebExtensionDataRequested(Box<WebExtensionDataRequest>),
+    /// Which data changes the profile's extensions now listen to.
+    WebExtensionDataInterest {
+        profile: ProfileId,
+        interest: crate::extension_data::ExtensionDataInterest,
+    },
     /// A native command matched the reserved browser-action shortcut for one
     /// exact published runtime and resident tab. The event carries no popup
     /// geometry: Shell must rejoin it to the current action snapshot and ask

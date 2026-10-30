@@ -41,6 +41,9 @@ use zephium_webext_macos::{
     TabSnapshot, WindowSnapshot,
 };
 
+#[path = "lab/data.rs"]
+mod data;
+
 const WINDOW: u64 = 1;
 
 fn main() {
@@ -72,6 +75,7 @@ fn main() {
 
 struct LabHost {
     lab: RefCell<std::rc::Weak<Lab>>,
+    data: data::LabData,
 }
 
 impl Host for LabHost {
@@ -165,6 +169,30 @@ impl Host for LabHost {
             _ => done(Err("not supported by the lab".into())),
         }
     }
+
+    fn browser_data(
+        &self,
+        _extension: &str,
+        call: zephium_core::extension_data::ExtensionDataCall,
+        done: Box<dyn FnOnce(zephium_core::extension_data::ExtensionDataReply)>,
+    ) {
+        let (reply, change) = self.data.answer(call);
+        let lab = self.lab.borrow().clone();
+        let heard = change.filter(|change| self.data.heard(change));
+        // The shell answers from another thread, later.
+        after(10, move || {
+            done(reply);
+            if let (Some(change), Some(lab)) = (heard, lab.upgrade()) {
+                println!("CHANGE {change:?}");
+                lab.runtime.data_changed(change);
+            }
+        });
+    }
+
+    fn data_interest(&self, interest: zephium_core::extension_data::ExtensionDataInterest) {
+        println!("INTEREST {interest:?}");
+        self.data.interest.set(interest);
+    }
 }
 
 struct Lab {
@@ -197,6 +225,7 @@ impl Lab {
 
         let host = Rc::new(LabHost {
             lab: RefCell::new(std::rc::Weak::new()),
+            data: Default::default(),
         });
         // WebKit's in-memory controller never delivers extension pages'
         // messages to the worker, so the lab uses a persistent profile: fresh

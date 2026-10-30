@@ -386,7 +386,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["idle", "notifications", "privacy", "webRequestAuthProvider"]);
+  const BROWSER_PERMISSIONS = new Set(["history", "idle", "notifications", "privacy", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -655,6 +655,28 @@
         DEFAULT: "default", DEFAULT_PUBLIC_AND_PRIVATE_INTERFACES: "default_public_and_private_interfaces",
         DEFAULT_PUBLIC_INTERFACE_ONLY: "default_public_interface_only", DISABLE_NON_PROXIED_UDP: "disable_non_proxied_udp",
       }),
+    });
+  }
+
+  // Browser data lives in the browser's own stores; WebKit has no API for it.
+  const dataEvent = (name) => (hub ? hub.event(name) : makeEvent());
+  const dataCall = (api) => (details, callback) => withCallback(native(api, { details }), callback);
+
+  if (!isContent && !chromeApi.history && declares("history")) {
+    pin(chromeApi, "history", {
+      TransitionType: Object.freeze({
+        LINK: "link", TYPED: "typed", AUTO_BOOKMARK: "auto_bookmark", AUTO_SUBFRAME: "auto_subframe",
+        MANUAL_SUBFRAME: "manual_subframe", GENERATED: "generated", AUTO_TOPLEVEL: "auto_toplevel",
+        FORM_SUBMIT: "form_submit", RELOAD: "reload", KEYWORD: "keyword", KEYWORD_GENERATED: "keyword_generated",
+      }),
+      search: dataCall("history.search"),
+      getVisits: dataCall("history.getVisits"),
+      addUrl: dataCall("history.addUrl"),
+      deleteUrl: dataCall("history.deleteUrl"),
+      deleteRange: dataCall("history.deleteRange"),
+      deleteAll: (callback) => dataCall("history.deleteAll")({}, callback),
+      onVisited: dataEvent("history.onVisited"),
+      onVisitRemoved: dataEvent("history.onVisitRemoved"),
     });
   }
 

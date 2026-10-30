@@ -12,8 +12,13 @@ use crate::runtime::{Grants, Shared};
 use crate::{events, json};
 
 /// Kept in sync with `BROWSER_PERMISSIONS` in the compatibility layer.
-pub const BROWSER_PERMISSIONS: &[&str] =
-    &["idle", "notifications", "privacy", "webRequestAuthProvider"];
+pub const BROWSER_PERMISSIONS: &[&str] = &[
+    "history",
+    "idle",
+    "notifications",
+    "privacy",
+    "webRequestAuthProvider",
+];
 
 /// Native-app access an extension declares optional is granted here too:
 /// WebKit holds `nativeMessaging` for the browser's own bridges, so only the
@@ -186,6 +191,7 @@ fn grant(shared: &Rc<Shared>, extension: &str, permissions: &[String]) {
         None => return,
     };
     if !added.is_empty() {
+        crate::data::refresh_interest(shared);
         events::emit(
             shared,
             extension,
@@ -227,6 +233,7 @@ pub(crate) fn remove(
         crate::native::close_extension(shared, &id);
     }
     if !removed.is_empty() {
+        crate::data::refresh_interest(shared);
         shared.host().access_removed(&id, &removed, &[]);
         crate::privacy::forget_if_revoked(shared, &id);
         events::emit(

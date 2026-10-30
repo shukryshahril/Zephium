@@ -594,6 +594,15 @@ pub trait Store {
     ) -> crate::bookmarks::BookmarkReply {
         crate::bookmarks::BookmarkReply::Failed(crate::bookmarks::BookmarkFailure::Unavailable)
     }
+    /// History as extensions read and change it. Blocking; callers run it
+    /// off the shell.
+    fn extension_history(
+        &self,
+        _profile: ProfileId,
+        _request: crate::extension_data::HistoryRequest,
+    ) -> crate::extension_data::HistoryReply {
+        crate::extension_data::HistoryReply::Failed
+    }
     /// Removes visits at or after `since`, or all of them when it is absent.
     fn load_blocker_statistics(
         &self,

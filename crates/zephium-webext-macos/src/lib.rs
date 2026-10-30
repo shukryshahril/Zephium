@@ -12,8 +12,10 @@ mod auth;
 mod bridge;
 pub mod compat;
 mod cookies;
+mod data;
 mod delegate;
 mod events;
+mod history;
 mod idle;
 mod json;
 mod lifetime;
@@ -169,6 +171,25 @@ pub trait Host {
     /// tab (or its default, which every tab without its own follows).
     fn action_changed(&self, extension: &str) {
         let _ = extension;
+    }
+
+    /// Reads or changes the profile's history, bookmarks or closed tabs for
+    /// an extension holding the permission. Answers `Unavailable` unless the
+    /// host keeps such data.
+    fn browser_data(
+        &self,
+        extension: &str,
+        call: zephium_core::extension_data::ExtensionDataCall,
+        done: Box<dyn FnOnce(zephium_core::extension_data::ExtensionDataReply)>,
+    ) {
+        let _ = (extension, call);
+        done(zephium_core::extension_data::ExtensionDataReply::Unavailable);
+    }
+
+    /// Which data changes extensions now listen to; the host reports them
+    /// through [`Runtime::data_changed`].
+    fn data_interest(&self, interest: zephium_core::extension_data::ExtensionDataInterest) {
+        let _ = interest;
     }
 }
 

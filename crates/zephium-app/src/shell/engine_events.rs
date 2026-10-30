@@ -300,6 +300,12 @@ impl Shell {
                     },
                 ));
             }
+            EngineEvent::WebExtensionDataRequested(request) => {
+                self.on_extension_data_request(*request)
+            }
+            EngineEvent::WebExtensionDataInterest { profile, interest } => {
+                self.set_extension_data_interest(profile, interest)
+            }
             EngineEvent::WebExtensionAccessRequested(request) => {
                 let request = *request;
                 (self.emit)(Projection::WebExtensionAccessRequest(
@@ -706,7 +712,8 @@ impl Shell {
                         .tab(id)
                         .map(|t| t.title.clone())
                         .unwrap_or_default();
-                    self.store.record_visit(profile, url, title);
+                    self.store.record_visit(profile, url.clone(), title);
+                    self.extension_visit_recorded(profile, &url);
                 }
                 self.schedule_url_checkpoint(id);
                 if first_committed_url {
@@ -764,6 +771,9 @@ impl Shell {
             EngineEvent::WebExtensionSettled { profile, .. } => Some(*profile),
             EngineEvent::WebExtensionAccessRequested(request) => Some(request.profile),
             EngineEvent::WebExtensionAccessRemoved(removal) => Some(removal.profile),
+            // Answered even during retirement, so the extension hears why.
+            EngineEvent::WebExtensionDataRequested(_) => None,
+            EngineEvent::WebExtensionDataInterest { profile, .. } => Some(*profile),
             EngineEvent::ExtensionActionShortcutRequested { runtime, .. } => {
                 Some(runtime.profile())
             }

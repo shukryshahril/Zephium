@@ -298,3 +298,11 @@ test("browser events subscribe, acknowledge and answer over one port", async () 
   port.deliver({ op: "event", name: "permissions.onAdded", args: [{}], seq: 8, reply: true });
   assert.ok(port.posted.some((m) => m.op === "reply" && m.seq === 8 && m.value === null), "unheard events answer null");
 });
+
+test("the API globals survive an extension hiding them", () => {
+  const g = context("worker");
+  const api = g.chrome;
+  vm.runInContext('"use strict"; for (const name of ["chrome", "browser"]) globalThis[name] = new Proxy({}, { get: () => undefined });', g);
+  assert.equal(g.chrome, api);
+  assert.equal(g.browser, api);
+});

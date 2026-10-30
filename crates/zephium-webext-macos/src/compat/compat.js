@@ -167,13 +167,20 @@
       return false;
     }
   };
-  pin(g, "chrome", chromeApi);
+  // WebKit finds the API through the global `browser` or `chrome` when it
+  // delivers runtime messages, so a context that hides both (Proton Pass
+  // swaps them for a locked Proxy) never hears another message. The globals
+  // stay the browser's and assignments to them are ignored.
   // WebKit gives `browser` its own copy of the API; making it the same object
   // lets every fix below reach extensions written against `browser.*`. Both
   // accept callbacks and return promises.
-  if (g.browser && g.browser !== chromeApi) {
-    kept.push(g.browser);
-    pin(g, "browser", chromeApi);
+  if (g.browser && g.browser !== chromeApi) kept.push(g.browser);
+  for (const name of ["chrome", "browser"]) {
+    try {
+      Object.defineProperty(g, name, { configurable: true, enumerable: true, get: () => chromeApi, set() {} });
+    } catch {
+      pin(g, name, chromeApi);
+    }
   }
   const namespace = (name) => {
     let value;

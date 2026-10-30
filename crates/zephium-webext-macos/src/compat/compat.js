@@ -617,6 +617,13 @@
     }
   }
 
+  // Every enabled extension's action is shown in Zephium's toolbar.
+  const action = !isContent && namespace("action");
+  if (action && typeof action.getUserSettings !== "function") {
+    pin(action, "getUserSettings", (callback) => withCallback(Promise.resolve({ isOnToolbar: true }), callback));
+    if (!action.onUserSettingsChanged) pin(action, "onUserSettingsChanged", makeEvent());
+  }
+
   // Only normal and popup windows exist here; Chrome answers other types
   // with no tabs, WebKit throws.
   const tabsApi = !isContent && namespace("tabs");

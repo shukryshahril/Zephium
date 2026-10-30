@@ -401,6 +401,14 @@ enum Cmd {
         zephium_core::bookmarks::BookmarkRequest,
         Sender<zephium_core::bookmarks::BookmarkReply>,
     ),
+    BookmarksObserved(
+        ProfileId,
+        zephium_core::bookmarks::BookmarkRequest,
+        Sender<(
+            zephium_core::bookmarks::BookmarkReply,
+            Option<zephium_core::bookmarks::BookmarkChange>,
+        )>,
+    ),
     ExtensionHistory(
         ProfileId,
         zephium_core::extension_data::HistoryRequest,
@@ -1464,6 +1472,32 @@ impl Store for SqliteStore {
             .unwrap_or(BookmarkReply::Failed(BookmarkFailure::Unavailable))
     }
 
+    fn bookmarks_observed(
+        &self,
+        profile: ProfileId,
+        request: zephium_core::bookmarks::BookmarkRequest,
+    ) -> (
+        zephium_core::bookmarks::BookmarkReply,
+        Option<zephium_core::bookmarks::BookmarkChange>,
+    ) {
+        use zephium_core::bookmarks::{BookmarkFailure, BookmarkReply, BookmarkRequest};
+        let timeout = if matches!(request, BookmarkRequest::Import { .. }) {
+            IMPORT_RPC_TIMEOUT
+        } else {
+            STORE_RPC_TIMEOUT
+        };
+        let failed = (BookmarkReply::Failed(BookmarkFailure::Unavailable), None);
+        let (tx, rx) = mpsc::channel();
+        if self
+            .tx
+            .try_send(Cmd::BookmarksObserved(profile, request, tx))
+            .is_err()
+        {
+            return failed;
+        }
+        rx.recv_timeout(timeout).unwrap_or(failed)
+    }
+
     fn extension_history(
         &self,
         profile: ProfileId,
@@ -2080,6 +2114,9 @@ fn actor(
             }
             Some(Cmd::Bookmarks(profile, request, reply)) => {
                 let _ = reply.send(hub.bookmarks(profile, request));
+            }
+            Some(Cmd::BookmarksObserved(profile, request, reply)) => {
+                let _ = reply.send(hub.bookmarks_observed(profile, request));
             }
             Some(Cmd::ExtensionHistory(profile, request, reply)) => {
                 use zephium_core::extension_data::{HistoryReply, HistoryRequest};

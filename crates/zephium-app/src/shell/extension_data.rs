@@ -81,6 +81,7 @@ impl Shell {
                 );
             }
             ExtensionDataCall::History(request) => ExtensionDataWork::History(request),
+            ExtensionDataCall::Bookmarks(request) => ExtensionDataWork::Bookmarks(request),
         };
         let removes_history = matches!(
             work,
@@ -125,6 +126,7 @@ impl Shell {
             ExtensionDataChange::Visited(_) | ExtensionDataChange::VisitsRemoved { .. } => {
                 interest.history
             }
+            ExtensionDataChange::Bookmark(_) => interest.bookmarks,
         };
         if heard
             && self.engine.web_extension_data_changed(profile, change) != NativeDispatch::Scheduled

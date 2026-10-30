@@ -2,6 +2,8 @@
 //! The shell answers from the profile's stores; a private profile keeps none
 //! of it.
 
+use crate::bookmarks::{BookmarkChange, BookmarkReply, BookmarkRequest};
+
 /// Addresses one history search returns.
 pub const MAX_HISTORY_RESULTS: u32 = 1_000;
 /// Visits one address lists.
@@ -81,10 +83,12 @@ pub enum HistoryReply {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExtensionDataCall {
     History(HistoryRequest),
+    Bookmarks(BookmarkRequest),
 }
 
 impl ExtensionDataCall {
-    /// What an extension may ask.
+    /// What an extension may ask; imports, exports and the panel's own
+    /// requests stay the browser's.
     pub fn validate(&self) -> bool {
         let address = |url: &str| url.len() <= crate::bookmarks::MAX_URL_BYTES;
         match self {
@@ -99,6 +103,35 @@ impl ExtensionDataCall {
                 HistoryRequest::RemoveRange { start, end } => start <= end,
                 HistoryRequest::RemoveAll => true,
             },
+            Self::Bookmarks(request) => match request {
+                BookmarkRequest::Entries { ids } => {
+                    !ids.is_empty() && ids.len() <= crate::bookmarks::MAX_ENTRIES as usize
+                }
+                BookmarkRequest::Find { query, url, title } => {
+                    query
+                        .as_ref()
+                        .is_none_or(|query| query.len() <= MAX_QUERY_BYTES)
+                        && url.as_deref().is_none_or(address)
+                        && title
+                            .as_ref()
+                            .is_none_or(|title| title.len() <= MAX_QUERY_BYTES)
+                }
+                BookmarkRequest::Create { url, title, .. } => {
+                    url.as_deref().is_none_or(address) && title.len() <= MAX_QUERY_BYTES
+                }
+                BookmarkRequest::Update { url, title, .. } => {
+                    url.as_deref().is_none_or(address)
+                        && title
+                            .as_ref()
+                            .is_none_or(|title| title.len() <= MAX_QUERY_BYTES)
+                }
+                BookmarkRequest::ChildEntries { .. }
+                | BookmarkRequest::Subtree { .. }
+                | BookmarkRequest::Recent { .. }
+                | BookmarkRequest::Relocate { .. }
+                | BookmarkRequest::Delete { .. } => true,
+                _ => false,
+            },
         }
     }
 }
@@ -106,6 +139,7 @@ impl ExtensionDataCall {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExtensionDataReply {
     History(HistoryReply),
+    Bookmarks(BookmarkReply),
     /// The profile keeps no such data: it is private, or its storage failed.
     Unavailable,
     /// Too many requests are already waiting.
@@ -117,6 +151,7 @@ pub enum ExtensionDataReply {
 pub enum ExtensionDataChange {
     Visited(HistoryEntry),
     VisitsRemoved { urls: Vec<String>, all: bool },
+    Bookmark(BookmarkChange),
 }
 
 /// Which changes some extension in a profile listens to; the shell does the
@@ -124,10 +159,11 @@ pub enum ExtensionDataChange {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ExtensionDataInterest {
     pub history: bool,
+    pub bookmarks: bool,
 }
 
 impl ExtensionDataInterest {
     pub fn any(self) -> bool {
-        self.history
+        self.history || self.bookmarks
     }
 }

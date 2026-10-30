@@ -8,7 +8,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
-use zephium_core::bookmarks::{BookmarkFailure, BookmarkNode, BookmarkReply, BookmarkRequest};
+use zephium_core::bookmarks::{
+    BookmarkChange, BookmarkFailure, BookmarkNode, BookmarkReply, BookmarkRequest,
+};
 use zephium_core::export::{ExportKind, HISTORY_CSV_HEADER, MAX_EXPORT_VISITS};
 use zephium_core::extension_data::{
     ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply, HistoryReply, HistoryRequest,
@@ -173,7 +175,7 @@ pub enum StoreReadResult {
     /// What a write changed, for the extensions listening to it.
     ExtensionDataChanged {
         profile: ProfileId,
-        change: ExtensionDataChange,
+        change: Box<ExtensionDataChange>,
     },
 }
 
@@ -181,6 +183,7 @@ pub enum StoreReadResult {
 #[derive(Clone, Debug)]
 pub enum ExtensionDataWork {
     History(HistoryRequest),
+    Bookmarks(BookmarkRequest),
     /// The address just visited, for `history.onVisited`.
     Visited(String),
 }
@@ -853,21 +856,32 @@ fn bookmark_work(
     store: &dyn zephium_core::ports::store::Store,
     profile: ProfileId,
     work: BookmarkWork,
-) -> BookmarkSurfaceReply {
+    observe: bool,
+) -> (BookmarkSurfaceReply, Option<BookmarkChange>) {
     use zephium_ipc::{bookmark_id, BookmarkCall};
-    let write = |request: BookmarkRequest| store.bookmarks(profile, request);
+    let made = std::cell::Cell::new(None);
+    let write = |request: BookmarkRequest| {
+        if observe {
+            let (reply, change) = store.bookmarks_observed(profile, request);
+            made.set(change);
+            reply
+        } else {
+            store.bookmarks(profile, request)
+        }
+    };
     let nodes = |reply: BookmarkReply| match reply {
         BookmarkReply::Nodes(nodes) => Ok(nodes),
         BookmarkReply::Failed(failure) => Err(failure),
-        BookmarkReply::Added(_) | BookmarkReply::Done | BookmarkReply::Imported(_) => {
-            Err(BookmarkFailure::Unavailable)
-        }
+        BookmarkReply::Added(_)
+        | BookmarkReply::Done
+        | BookmarkReply::Imported(_)
+        | BookmarkReply::Entries(_) => Err(BookmarkFailure::Unavailable),
     };
     let saved = |reply: BookmarkReply| match reply {
         BookmarkReply::Added(id) => BookmarkSurfaceReply::Saved(Some(id)),
         BookmarkReply::Done => BookmarkSurfaceReply::Saved(None),
         BookmarkReply::Failed(failure) => BookmarkSurfaceReply::Failed(failure),
-        BookmarkReply::Nodes(_) | BookmarkReply::Imported(_) => {
+        BookmarkReply::Nodes(_) | BookmarkReply::Imported(_) | BookmarkReply::Entries(_) => {
             BookmarkSurfaceReply::Failed(BookmarkFailure::Unavailable)
         }
     };
@@ -886,7 +900,7 @@ fn bookmark_work(
                 url,
                 if_absent: true,
             }));
-            return reply;
+            return (reply, made.take());
         }
         BookmarkWork::Surface(call) => call,
     };
@@ -957,7 +971,10 @@ fn bookmark_work(
             id(target).map(|id| saved(write(BookmarkRequest::Remove { id })))
         }
     };
-    result.unwrap_or_else(BookmarkSurfaceReply::Failed)
+    (
+        result.unwrap_or_else(BookmarkSurfaceReply::Failed),
+        made.take(),
+    )
 }
 
 /// Visits fetched per store call, the most a history page returns.
@@ -1140,11 +1157,16 @@ fn run_with(
                 token,
                 profile,
                 work,
-            } => StoreReadResult::Bookmarks {
-                token,
-                profile,
-                reply: bookmark_work(&*store, profile, work),
-            },
+            } => {
+                let observe = queue.interest(profile).bookmarks;
+                let (reply, made) = bookmark_work(&*store, profile, work, observe);
+                change = made.map(|made| (profile, ExtensionDataChange::Bookmark(made)));
+                StoreReadResult::Bookmarks {
+                    token,
+                    profile,
+                    reply,
+                }
+            }
             Request::Import {
                 token,
                 profile,
@@ -1153,7 +1175,14 @@ fn run_with(
                 token,
                 added: match work {
                     ImportWork::Bookmarks { folder, nodes } => {
-                        match store.bookmarks(profile, BookmarkRequest::Import { folder, nodes }) {
+                        let request = BookmarkRequest::Import { folder, nodes };
+                        let (reply, made) = if queue.interest(profile).bookmarks {
+                            store.bookmarks_observed(profile, request)
+                        } else {
+                            (store.bookmarks(profile, request), None)
+                        };
+                        change = made.map(|made| (profile, ExtensionDataChange::Bookmark(made)));
+                        match reply {
                             BookmarkReply::Imported(added) => Some(added),
                             _ => None,
                         }
@@ -1237,7 +1266,10 @@ fn run_with(
         };
         let _ = deliver(result);
         if let Some((profile, change)) = change {
-            let _ = deliver(StoreReadResult::ExtensionDataChanged { profile, change });
+            let _ = deliver(StoreReadResult::ExtensionDataChanged {
+                profile,
+                change: Box::new(change),
+            });
         }
     }
 }
@@ -1264,6 +1296,17 @@ fn extension_work(
                 _ => None,
             };
             (ExtensionDataReply::History(reply), change)
+        }
+        ExtensionDataWork::Bookmarks(request) => {
+            let (reply, change) = if interest.bookmarks {
+                store.bookmarks_observed(profile, request)
+            } else {
+                (store.bookmarks(profile, request), None)
+            };
+            (
+                ExtensionDataReply::Bookmarks(reply),
+                change.map(ExtensionDataChange::Bookmark),
+            )
         }
         ExtensionDataWork::Visited(url) => {
             let change = match store.extension_history(profile, HistoryRequest::Address { url }) {

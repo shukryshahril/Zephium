@@ -10,7 +10,7 @@ use zephium_core::extension_data::{
 };
 
 use crate::runtime::Shared;
-use crate::{api, events, history};
+use crate::{api, bookmarks, events, history};
 
 pub(crate) type Done = Box<dyn FnOnce(Result<Value, String>)>;
 pub(crate) type Answer = Box<dyn FnOnce(ExtensionDataReply) -> Result<Value, String>>;
@@ -24,7 +24,7 @@ pub(crate) struct Call {
 }
 
 pub(crate) fn handles(api: &str) -> bool {
-    api.starts_with("history.")
+    api.starts_with("history.") || api.starts_with("bookmarks.")
 }
 
 pub(crate) fn request(
@@ -36,6 +36,7 @@ pub(crate) fn request(
 ) {
     let call = match api.split_once('.') {
         Some(("history", op)) => history::call(op, message),
+        Some(("bookmarks", op)) => bookmarks::call(op, message),
         _ => Err(format!("{api} is not supported")),
     };
     let Call {
@@ -80,6 +81,7 @@ pub(crate) fn changed(shared: &Rc<Shared>, change: ExtensionDataChange) {
                 json!([{ "allHistory": all, "urls": if *all { &[][..] } else { &urls[..] } }]),
             )],
         ),
+        ExtensionDataChange::Bookmark(change) => (bookmarks::PERMISSION, bookmarks::events(change)),
     };
     let listening: Vec<String> = shared
         .loaded
@@ -108,6 +110,7 @@ fn listens(shared: &Shared, permission: &str, names: &[&str]) -> bool {
 pub(crate) fn refresh_interest(shared: &Shared) {
     let interest = ExtensionDataInterest {
         history: listens(shared, history::PERMISSION, history::EVENTS),
+        bookmarks: listens(shared, bookmarks::PERMISSION, bookmarks::EVENTS),
     };
     if shared.data_interest.replace(interest) != interest {
         shared.host().data_interest(interest);

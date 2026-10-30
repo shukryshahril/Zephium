@@ -112,7 +112,14 @@ fn visits_are_described_only_while_an_extension_listens() {
     let (mut shell, engine, screen, store, queue) = browsed();
     let profile = shell.windows.focused().unwrap().profile;
     visit(&mut shell, &screen, "unheard.example");
-    listen(&mut shell, profile, ExtensionDataInterest { history: true });
+    listen(
+        &mut shell,
+        profile,
+        ExtensionDataInterest {
+            history: true,
+            ..Default::default()
+        },
+    );
     visit(&mut shell, &screen, "heard.example");
     drain(&mut shell, store, queue);
     let changes = engine.extension_data_changes.lock().unwrap();

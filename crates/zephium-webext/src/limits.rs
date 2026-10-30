@@ -63,11 +63,6 @@ const GAPS: &[(&[Uses], &str, u8)] = &[
         "Can't block requests the old way (webRequestBlocking)",
         MAC,
     ),
-    (
-        &[Permission("bookmarks")],
-        "Can't read or change your bookmarks",
-        MAC,
-    ),
     (&[Permission("downloads")], "Can't manage downloads", MAC),
     (
         &[Permission("sessions")],
@@ -277,7 +272,7 @@ mod tests {
 
     #[test]
     fn browser_data_the_browser_keeps_is_not_named() {
-        let raw = json!({"manifest_version": 3, "permissions": ["history"]});
+        let raw = json!({"manifest_version": 3, "permissions": ["history", "bookmarks"]});
         assert!(assess(raw, Platform::Macos).is_empty());
     }
 

@@ -386,7 +386,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["history", "idle", "notifications", "privacy", "webRequestAuthProvider"]);
+  const BROWSER_PERMISSIONS = new Set(["bookmarks", "history", "idle", "notifications", "privacy", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -677,6 +677,34 @@
       deleteAll: (callback) => dataCall("history.deleteAll")({}, callback),
       onVisited: dataEvent("history.onVisited"),
       onVisitRemoved: dataEvent("history.onVisitRemoved"),
+    });
+  }
+
+  // Chrome's root "0" stands above the browser's top level; there is no
+  // bookmarks bar or other permanent folder.
+  if (!isContent && !chromeApi.bookmarks && declares("bookmarks")) {
+    const ask = (op, fields, callback) => withCallback(native(`bookmarks.${op}`, fields), callback);
+    const event = (name) => dataEvent(`bookmarks.${name}`);
+    pin(chromeApi, "bookmarks", {
+      getTree: (callback) => ask("getTree", {}, callback),
+      getSubTree: (id, callback) => ask("getSubTree", { id }, callback),
+      getChildren: (id, callback) => ask("getChildren", { id }, callback),
+      get: (ids, callback) => ask("get", { ids: [].concat(ids) }, callback),
+      getRecent: (count, callback) => ask("getRecent", { count }, callback),
+      search: (query, callback) => ask("search", { details: query }, callback),
+      create: (bookmark, callback) => ask("create", { details: bookmark || {} }, callback),
+      update: (id, changes, callback) => ask("update", { id, details: changes || {} }, callback),
+      move: (id, destination, callback) => ask("move", { id, details: destination || {} }, callback),
+      remove: (id, callback) => ask("remove", { id }, callback),
+      removeTree: (id, callback) => ask("removeTree", { id }, callback),
+      onCreated: event("onCreated"),
+      onChanged: event("onChanged"),
+      onMoved: event("onMoved"),
+      onRemoved: event("onRemoved"),
+      // The browser keeps no custom order apart from moves, which onMoved reports.
+      onChildrenReordered: makeEvent(),
+      onImportBegan: event("onImportBegan"),
+      onImportEnded: event("onImportEnded"),
     });
   }
 

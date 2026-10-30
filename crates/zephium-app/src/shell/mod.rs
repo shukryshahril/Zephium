@@ -2229,7 +2229,7 @@ impl Shell {
                 self.on_extension_data_read(token, reply)
             }
             StoreReadResult::ExtensionDataChanged { profile, change } => {
-                self.on_extension_data_changed(profile, change)
+                self.on_extension_data_changed(profile, *change)
             }
         }
     }

@@ -41,6 +41,8 @@ function context(kind, declared = []) {
             return message.id;
           case "idle.query":
             return message.interval >= 15 ? "active" : "invalid";
+          case "bookmarks.create":
+            return { id: "9", parentId: message.details.parentId, index: 0, title: message.details.title };
           case "history.search":
             return [{ id: "1", url: "https://a.example/", title: "A", lastVisitTime: 1, visitCount: 1, typedCount: 0 }];
           default:
@@ -403,4 +405,24 @@ test("browser data namespaces exist only when declared and pass Chrome's argumen
     assert.equal(typeof chrome.history.onVisitRemoved.hasListeners, "function", kind);
   }
   assert.equal(context("content", ["history"]).chrome.history, undefined, "not in content scripts");
+});
+
+test("bookmarks pass ids and details through as Chrome takes them", async () => {
+  assert.equal(context("page").chrome.bookmarks, undefined);
+  const { chrome } = context("page", ["bookmarks"]);
+  const made = await chrome.bookmarks.create({ parentId: "4", title: "T", url: "https://t.example/" });
+  assert.equal(made.id, "9");
+  assert.equal(
+    JSON.stringify(chrome.runtime.messages.at(-1)),
+    JSON.stringify({ api: "bookmarks.create", details: { parentId: "4", title: "T", url: "https://t.example/" } }),
+  );
+  await chrome.bookmarks.get("4");
+  assert.equal(JSON.stringify(chrome.runtime.messages.at(-1)), JSON.stringify({ api: "bookmarks.get", ids: ["4"] }));
+  await chrome.bookmarks.move("9", { index: 0 });
+  assert.equal(JSON.stringify(chrome.runtime.messages.at(-1)), JSON.stringify({ api: "bookmarks.move", id: "9", details: { index: 0 } }));
+  await chrome.bookmarks.search("docs");
+  assert.equal(chrome.runtime.messages.at(-1).details, "docs");
+  for (const name of ["onCreated", "onChanged", "onMoved", "onRemoved", "onChildrenReordered", "onImportBegan", "onImportEnded"]) {
+    assert.equal(typeof chrome.bookmarks[name].addListener, "function", name);
+  }
 });

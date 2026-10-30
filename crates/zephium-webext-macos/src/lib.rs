@@ -10,6 +10,7 @@ mod access;
 mod api;
 mod bridge;
 pub mod compat;
+mod cookies;
 mod delegate;
 mod events;
 mod idle;

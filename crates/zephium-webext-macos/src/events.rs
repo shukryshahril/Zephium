@@ -125,6 +125,7 @@ pub(crate) fn connect(
     let on_disconnect = RcBlock::new(move |_error: *mut NSError| {
         if let Some(shared) = weak.upgrade() {
             drop_port(&shared, key);
+            crate::cookies::refresh(&shared);
         }
     });
     unsafe {
@@ -179,6 +180,7 @@ fn receive(shared: &Rc<Shared>, key: usize, message: Value) {
             if worker {
                 pump(shared, &port.extension);
             }
+            crate::cookies::refresh(shared);
         }
         Some("ack") => {
             let Some(seq) = message.get("seq").and_then(Value::as_u64) else {

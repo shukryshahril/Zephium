@@ -335,6 +335,27 @@
         })()
       : null;
 
+  // WebKit's event objects can't be replaced on their namespaces; their
+  // methods can. `alongside` keeps WebKit's own delivery as well.
+  const adopt = (event, ours, alongside = false) => {
+    kept.push(event);
+    const add = event.addListener;
+    const remove = event.removeListener;
+    const has = event.hasListener;
+    pin(event, "addListener", function (listener) {
+      if (alongside) add.call(this, listener);
+      ours.addListener(listener);
+    });
+    pin(event, "removeListener", function (listener) {
+      if (alongside) remove.call(this, listener);
+      ours.removeListener(listener);
+    });
+    pin(event, "hasListener", function (listener) {
+      return ours.hasListener(listener) || (alongside && has.call(this, listener));
+    });
+    pin(event, "hasListeners", () => ours.hasListeners());
+  };
+
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
   const BROWSER_PERMISSIONS = new Set(["idle", "privacy"]);
   const manifest = (() => {
@@ -420,17 +441,20 @@
     // them; a listening port keeps a worker loaded longer.
     if (hub && [...BROWSER_PERMISSIONS].some(declares)) {
       for (const name of ["onAdded", "onRemoved"]) {
-        const ours = hub.event(`permissions.${name}`);
         const theirs = permissions[name];
-        if (!theirs || typeof theirs.addListener !== "function") continue;
-        kept.push(theirs);
-        pin(permissions, name, {
-          addListener: (listener) => (theirs.addListener(listener), ours.addListener(listener)),
-          removeListener: (listener) => (theirs.removeListener(listener), ours.removeListener(listener)),
-          hasListener: (listener) => theirs.hasListener(listener) || ours.hasListener(listener),
-        });
+        if (theirs && typeof theirs.addListener === "function") adopt(theirs, hub.event(`permissions.${name}`), true);
       }
     }
+  }
+
+  // WebKit raises cookies.onChanged without saying what changed; the
+  // browser compares the cookie store and says it, as Chrome does.
+  const cookies = hub && namespace("cookies");
+  if (cookies && cookies.onChanged) adopt(cookies.onChanged, hub.event("cookies.onChanged"));
+  if (cookies && !cookies.OnChangedCause) {
+    pin(cookies, "OnChangedCause", Object.freeze({
+      EVICTED: "evicted", EXPIRED: "expired", EXPLICIT: "explicit", EXPIRED_OVERWRITE: "expired_overwrite", OVERWRITE: "overwrite",
+    }));
   }
 
   // Locks a vault or pauses work while the person is away from the Mac.

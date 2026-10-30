@@ -8,7 +8,7 @@ use std::sync::Once;
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2::{MainThreadMarker, MainThreadOnly, Message};
 use objc2_foundation::{NSArray, NSError, NSSet, NSString, NSURL, NSUUID};
 use objc2_web_kit::{
     WKWebExtension, WKWebExtensionContext, WKWebExtensionContextPermissionStatus,
@@ -76,6 +76,8 @@ pub(crate) struct Shared {
     pub(crate) access: crate::access::Batches,
     pub(crate) events: crate::events::Hub,
     pub(crate) privacy: crate::privacy::Overrides,
+    pub(crate) cookies: crate::cookies::Watch,
+    pub(crate) store: Retained<WKWebsiteDataStore>,
     pub(crate) mtm: MainThreadMarker,
 }
 
@@ -143,6 +145,8 @@ impl Runtime {
             access: Default::default(),
             events: Default::default(),
             privacy: Default::default(),
+            cookies: Default::default(),
+            store: store.retain(),
             mtm,
         });
         let delegate = Delegate::new(mtm, Rc::downgrade(&shared));
@@ -725,6 +729,7 @@ fn unload(shared: &Rc<Shared>, controller: &WKWebExtensionController, id: &str) 
     crate::events::forget(shared, id);
     crate::idle::forget(shared, id);
     crate::privacy::forget(shared, id);
+    crate::cookies::refresh(shared);
     unsafe { controller.unloadExtensionContext_error(&loaded.context) }.is_ok()
 }
 

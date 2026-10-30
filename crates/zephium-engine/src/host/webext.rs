@@ -859,6 +859,38 @@ fn presentation_revision(label: &str, badge: &str, icon: Option<&[u8]>) -> Exten
 
 /// Chrome shows a multi-line title as a tooltip; a button's name is its first
 /// line (Google Translate's title goes on to explain its clicks).
+/// An API-gap error's wording without addresses or quoted text, which may
+/// carry page content.
+fn redact(text: &str) -> String {
+    let mut out = String::with_capacity(text.len().min(300));
+    let mut quote: Option<char> = None;
+    for word in text.split(' ') {
+        if !out.is_empty() && quote.is_none() {
+            out.push(' ');
+        }
+        if quote.is_none() && word.contains("://") {
+            out.push_str("<address>");
+            continue;
+        }
+        for c in word.chars() {
+            match quote {
+                Some(open) if c == open => {
+                    quote = None;
+                    out.push('\u{2026}');
+                    out.push(c);
+                }
+                Some(_) => {}
+                None if matches!(c, '"' | '`') => {
+                    quote = Some(c);
+                    out.push(c);
+                }
+                None => out.push(c),
+            }
+        }
+    }
+    out.chars().take(300).collect()
+}
+
 fn first_line(text: &str) -> String {
     let line = text
         .lines()
@@ -1426,6 +1458,8 @@ impl Host for Bridge {
         // The local log a person may attach to a report keeps only its size.
         if cfg!(debug_assertions) {
             eprintln!("extension {extension} {tag}: {message}{suffix}");
+        } else if let Some(gap) = message.strip_prefix("[gap] ") {
+            eprintln!("extension {extension} {tag}: gap {}{suffix}", redact(gap));
         } else {
             let length = message.chars().count();
             eprintln!("extension {extension} {tag}: {length} characters{suffix}");
@@ -2309,6 +2343,20 @@ mod tests {
         assert!(!key_equivalent_matches("T", cmd, "t", cmd));
         assert!(!key_equivalent_matches("y", cmd, "t", cmd));
         assert!(!key_equivalent_matches("", cmd, "", cmd));
+    }
+
+    #[test]
+    fn gap_errors_keep_their_wording_but_not_addresses_or_quoted_text() {
+        assert_eq!(
+            super::redact(
+                "TypeError: chrome.idle.queryState is not a function @ chrome-extension://abc/w.js:1:2"
+            ),
+            "TypeError: chrome.idle.queryState is not a function @ <address>"
+        );
+        assert_eq!(
+            super::redact("Invalid call to x(\"secret token\") for `me@example.com`"),
+            "Invalid call to x(\"\u{2026}\") for `\u{2026}`"
+        );
     }
 
     #[test]

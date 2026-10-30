@@ -14,11 +14,36 @@ function context(kind) {
     runtime: {
       id: "abcdefghijklmnopabcdefghijklmnop",
       sent: [],
+      granted: ["privacy"],
+      settings: {},
       async sendNativeMessage(_app, message) {
         this.sent.push(message.api);
-        return message.api === "trace" ? false : null;
+        switch (message.api) {
+          case "trace":
+            return false;
+          case "permissions.state":
+            return { granted: this.granted, declared: ["privacy", "idle"] };
+          case "permissions.request":
+            for (const name of message.permissions) if (!this.granted.includes(name)) this.granted.push(name);
+            return true;
+          case "permissions.remove":
+            this.granted = this.granted.filter((name) => !message.permissions.includes(name));
+            return true;
+          case "privacy.get":
+            return message.setting in this.settings
+              ? { value: this.settings[message.setting], levelOfControl: "controlled_by_this_extension" }
+              : { value: true, levelOfControl: "controllable_by_this_extension" };
+          case "privacy.set":
+            this.settings[message.setting] = message.value;
+            return null;
+          case "idle.query":
+            return message.interval >= 15 ? "active" : "invalid";
+          default:
+            return null;
+        }
       },
-      connectNative: (application) => {
+      ports: [],
+      connectNative(application) {
         const listeners = new Set();
         const port = {
           application,
@@ -35,11 +60,18 @@ function context(kind) {
           disconnect() {},
           deliver: (message) => listeners.forEach((listener) => listener(message)),
         };
+        this.ports.push(port);
         return port;
       },
       onMessage: event(),
       onConnect: event(),
-      getManifest: () => ({ name: "__MSG_name__", version: "1.2", permissions: ["tabs", "https://a.test/*"], options_page: "options.html" }),
+      getManifest: () => ({
+        name: "__MSG_name__",
+        version: "1.2",
+        permissions: ["tabs", "https://a.test/*", "privacy"],
+        optional_permissions: ["idle"],
+        options_page: "options.html",
+      }),
       getURL: (path) => `chrome-extension://abcdefghijklmnopabcdefghijklmnop/${path}`,
     },
     i18n: { getMessage: (key) => (key === "name" ? "Probe" : "") },
@@ -139,7 +171,10 @@ test("pages and workers get every API fix", async () => {
     const { chrome, browser } = context(kind);
     assert.equal(browser, chrome, `${kind}: browser aliases chrome`);
     assert.equal(await chrome.permissions.contains({ permissions: ["privacy"] }), true, kind);
-    assert.equal(await chrome.permissions.request({ permissions: ["privacy"] }), true, kind);
+    assert.equal(await chrome.permissions.contains({ permissions: ["idle"] }), false, kind);
+    assert.equal(await chrome.permissions.request({ permissions: ["idle"] }), true, kind);
+    assert.equal(await chrome.permissions.contains({ permissions: ["idle", "privacy"] }), true, kind);
+    assert.equal(await chrome.idle.queryState(20), "active", kind);
     assert.equal(await chrome.permissions.contains({ permissions: ["proxy"] }), false, kind);
     assert.equal(await chrome.permissions.contains({ permissions: ["tabGroups"] }), false, kind);
     assert.equal(Object.keys(await chrome.storage.managed.get()).length, 0, kind);
@@ -150,10 +185,12 @@ test("pages and workers get every API fix", async () => {
     assert.equal(typeof chrome.notifications.create, "function", kind);
     assert.match(chrome.identity.getRedirectURL("cb"), /^https:\/\/abcdefghijklmnopabcdefghijklmnop\.chromiumapp\.org\/cb$/);
     const saving = await chrome.privacy.services.passwordSavingEnabled.get({});
-    assert.equal(saving.value, false, kind);
-    assert.equal(saving.levelOfControl, "controlled_by_this_extension", kind);
-    await chrome.privacy.services.passwordSavingEnabled.set({ value: true });
-    assert.equal((await chrome.privacy.services.passwordSavingEnabled.get({})).value, true, kind);
+    assert.equal(saving.value, true, kind);
+    assert.equal(saving.levelOfControl, "controllable_by_this_extension", kind);
+    await chrome.privacy.services.passwordSavingEnabled.set({ value: false });
+    const set = await chrome.privacy.services.passwordSavingEnabled.get({});
+    assert.equal(set.value, false, kind);
+    assert.equal(set.levelOfControl, "controlled_by_this_extension", kind);
 
     assert.equal(chrome.runtime.OnInstalledReason.INSTALL, "install", kind);
     assert.equal(typeof chrome.runtime.onUpdateAvailable.addListener, "function", kind);
@@ -187,7 +224,7 @@ test("pages and workers get every API fix", async () => {
     const self = await chrome.management.getSelf();
     assert.equal(self.name, "Probe", kind);
     assert.equal(self.installType, "normal", kind);
-    assert.equal(JSON.stringify(self.permissions), JSON.stringify(["tabs"]), kind);
+    assert.equal(JSON.stringify(self.permissions), JSON.stringify(["tabs", "privacy"]), kind);
     assert.equal(self.optionsUrl, "chrome-extension://abcdefghijklmnopabcdefghijklmnop/options.html", kind);
   }
 });
@@ -239,4 +276,25 @@ test("content scripts keep the page's identity", () => {
   const g = context("content");
   assert.doesNotMatch(g.navigator.userAgent, / Chrome\//);
   assert.equal(typeof g.chrome.storage.managed, "object");
+});
+
+test("browser events subscribe, acknowledge and answer over one port", async () => {
+  const { chrome } = context("worker");
+  const states = [];
+  chrome.idle.onStateChanged.addListener((state) => states.push(state));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const port = chrome.runtime.ports.find((p) => p.application === "app.zephium.events");
+  assert.ok(port, "a port opens for the first listener");
+  assert.equal(port.posted[0].op, "hello");
+  port.deliver({ op: "hello" });
+  const subscribe = port.posted.find((m) => m.op === "subscribe");
+  assert.equal(JSON.stringify([subscribe.worker, subscribe.events]), JSON.stringify([true, ["idle.onStateChanged"]]));
+  assert.ok(chrome.runtime.sent.includes("idle.watch"), "listening starts the browser's watch");
+
+  port.deliver({ op: "event", name: "idle.onStateChanged", args: ["idle"], seq: 7 });
+  assert.equal(JSON.stringify(states), JSON.stringify(["idle"]));
+  assert.ok(port.posted.some((m) => m.op === "ack" && m.seq === 7));
+
+  port.deliver({ op: "event", name: "permissions.onAdded", args: [{}], seq: 8, reply: true });
+  assert.ok(port.posted.some((m) => m.op === "reply" && m.seq === 8 && m.value === null), "unheard events answer null");
 });

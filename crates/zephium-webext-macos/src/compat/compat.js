@@ -238,6 +238,115 @@
     };
   };
 
+  // ---- Browser events ------------------------------------------------------
+  // Events of the APIs the browser implements reach listening contexts over a
+  // port; the browser starts the worker for events it listens to, and resends
+  // whatever the worker didn't acknowledge.
+  const hub =
+    !isContent && typeof runtime.connectNative === "function"
+      ? (() => {
+          const listeners = new Map();
+          let port = null;
+          let ready = false;
+          let hello = null;
+          let pending = false;
+          let retry = 0;
+          const names = () => [...listeners].filter(([, set]) => set.size > 0).map(([name]) => name);
+          const subscribe = () => {
+            pending = false;
+            if (!port) return connect();
+            if (ready) port.postMessage({ op: "subscribe", worker: isWorker, events: names() });
+          };
+          const receive = (message) => {
+            if (!message) return;
+            if (message.op === "hello") {
+              if (!ready) {
+                ready = true;
+                retry = 0;
+                clearInterval(hello);
+                subscribe();
+              }
+              return;
+            }
+            if (message.op !== "event") return;
+            if (message.seq !== undefined) port.postMessage({ op: "ack", seq: message.seq });
+            const set = listeners.get(message.name);
+            const args = Array.isArray(message.args) ? message.args : [];
+            let replied = !message.reply;
+            const reply = (value) => {
+              if (replied) return;
+              replied = true;
+              if (port) port.postMessage({ op: "reply", seq: message.seq, value: value === undefined ? null : value });
+            };
+            for (const listener of set ? [...set] : []) {
+              try {
+                const result = listener(...args, ...(message.reply ? [reply] : []));
+                if (message.reply && result !== undefined) Promise.resolve(result).then(reply, () => reply(null));
+              } catch (error) {
+                setTimeout(() => {
+                  throw error;
+                });
+              }
+            }
+            if (message.reply && !(set && set.size)) reply(null);
+          };
+          const connect = () => {
+            if (port || names().length === 0) return;
+            port = runtime.connectNative("app.zephium.events");
+            port.onMessage.addListener(receive);
+            port.onDisconnect.addListener(() => {
+              clearInterval(hello);
+              port = null;
+              ready = false;
+              if (names().length) setTimeout(connect, Math.min(30000, 250 * 2 ** retry++));
+            });
+            const greet = () => {
+              try {
+                if (port) port.postMessage({ op: "hello" });
+              } catch {}
+            };
+            greet();
+            hello = setInterval(greet, 50);
+          };
+          const changed = () => {
+            if (pending) return;
+            pending = true;
+            setTimeout(subscribe, 0);
+          };
+          return {
+            event(name, onListen) {
+              const set = listeners.get(name) || new Set();
+              listeners.set(name, set);
+              return {
+                addListener(listener) {
+                  if (typeof listener !== "function" || set.has(listener)) return;
+                  set.add(listener);
+                  changed();
+                  if (onListen) onListen();
+                },
+                removeListener(listener) {
+                  if (set.delete(listener)) changed();
+                },
+                hasListener: (listener) => set.has(listener),
+                hasListeners: () => set.size > 0,
+              };
+            },
+          };
+        })()
+      : null;
+
+  // Permissions of the APIs the browser implements; WebKit doesn't know them.
+  const BROWSER_PERMISSIONS = new Set(["idle", "privacy"]);
+  const manifest = (() => {
+    try {
+      return runtime.getManifest() || {};
+    } catch {
+      return {};
+    }
+  })();
+  const declares = (name) =>
+    [].concat(manifest.permissions || [], manifest.optional_permissions || []).includes(name);
+
   // Chrome answers "not granted" for permissions a browser doesn't know;
   // WebKit throws, which takes down callers such as Bitwarden's popup. The
   // retry stays synchronous so a request keeps the user's gesture.
@@ -247,22 +356,27 @@
     // WebKit rejects some unknown names synchronously and others only in the
     // returned promise; names learned either way are filtered up front.
     const unknownNames = new Set(["proxy", "debugger"]);
-    // Implemented by this layer, so always granted.
-    const emulated = new Set(["privacy"]);
+    const browserState = () => native("permissions.state", {}).catch(() => ({ granted: [] }));
+    const browserPart = {
+      contains: (names, ok) =>
+        ok && names.length ? browserState().then((state) => names.every((name) => state.granted.includes(name))) : ok,
+      request: (names, ok) => (ok && names.length ? native("permissions.request", { permissions: names }) : ok),
+      remove: (names, ok) => (names.length ? native("permissions.remove", { permissions: names }).then((done) => ok && done) : ok),
+    };
     const guard = (method, withUnknown) => {
       const original = permissions[method];
       if (typeof original !== "function") return;
       pin(permissions, method, function (request, callback) {
         const current = Object.assign({}, request);
         const requested = Array.isArray(current.permissions) ? current.permissions : [];
+        const browserNames = requested.filter((name) => BROWSER_PERMISSIONS.has(name));
         let unknown = requested.some((name) => unknownNames.has(name));
-        const onlyEmulated = requested.some((name) => emulated.has(name));
-        current.permissions = requested.filter((name) => !unknownNames.has(name) && !emulated.has(name));
+        current.permissions = requested.filter((name) => !unknownNames.has(name) && !BROWSER_PERMISSIONS.has(name));
         let result;
         for (;;) {
           const listed = Array.isArray(current.permissions) ? current.permissions : [];
           const origins = Array.isArray(current.origins) ? current.origins : [];
-          if ((unknown || onlyEmulated) && listed.length === 0 && origins.length === 0) {
+          if ((unknown || browserNames.length) && listed.length === 0 && origins.length === 0) {
             result = Promise.resolve(true);
             break;
           }
@@ -286,12 +400,55 @@
           unknownNames.add(name);
           return withUnknown();
         });
-        return withCallback(unknown ? result.then(withUnknown) : result, callback);
+        if (unknown) result = result.then(withUnknown);
+        return withCallback(result.then((ok) => browserPart[method](browserNames, ok)), callback);
       });
     };
     guard("contains", () => false);
     guard("request", () => false);
     guard("remove", (removed) => removed !== false);
+    if (typeof permissions.getAll === "function") {
+      const getAll = permissions.getAll;
+      pin(permissions, "getAll", function (callback) {
+        const all = Promise.all([Promise.resolve(getAll.call(permissions)), browserState()]).then(([found, state]) =>
+          Object.assign({}, found, { permissions: [...new Set([...(found.permissions || []), ...state.granted])] }),
+        );
+        return withCallback(all, callback);
+      });
+    }
+    // Only extensions that can hold the browser's own permissions hear about
+    // them; a listening port keeps a worker loaded longer.
+    if (hub && [...BROWSER_PERMISSIONS].some(declares)) {
+      for (const name of ["onAdded", "onRemoved"]) {
+        const ours = hub.event(`permissions.${name}`);
+        const theirs = permissions[name];
+        if (!theirs || typeof theirs.addListener !== "function") continue;
+        kept.push(theirs);
+        pin(permissions, name, {
+          addListener: (listener) => (theirs.addListener(listener), ours.addListener(listener)),
+          removeListener: (listener) => (theirs.removeListener(listener), ours.removeListener(listener)),
+          hasListener: (listener) => theirs.hasListener(listener) || ours.hasListener(listener),
+        });
+      }
+    }
+  }
+
+  // Locks a vault or pauses work while the person is away from the Mac.
+  if (hub && !chromeApi.idle && declares("idle")) {
+    let interval = 60;
+    const watch = () => native("idle.watch", { interval }).catch(() => {});
+    const onStateChanged = hub.event("idle.onStateChanged", watch);
+    pin(chromeApi, "idle", {
+      IdleState: Object.freeze({ ACTIVE: "active", IDLE: "idle", LOCKED: "locked" }),
+      queryState: (seconds, callback) =>
+        withCallback(native("idle.query", { interval: Math.max(15, Math.floor(Number(seconds) || 0)) }), callback),
+      setDetectionInterval: (seconds) => {
+        interval = Math.max(15, Math.floor(Number(seconds) || 60));
+        if (onStateChanged.hasListeners()) watch();
+      },
+      getAutoLockDelay: (callback) => withCallback(Promise.resolve(0), callback),
+      onStateChanged,
+    });
   }
 
   // OAuth sign-in: the browser opens the provider's page and returns the
@@ -332,52 +489,36 @@
     }
   }
 
-  // Password managers turn off the browser's own password saving through
-  // chrome.privacy; WebKit has no privacy API. The settings answer as
-  // controllable by the extension and remember what it sets.
-  if (!isContent && !chromeApi.privacy) {
-    const setting = (initial, levelOfControl = "controllable_by_this_extension") => {
-      let value = initial;
-      const changed = makeEvent();
-      const details = () => ({ value, levelOfControl });
+  // Password managers turn the browser's own password filling off through
+  // chrome.privacy; WebKit has no privacy API. The browser keeps the settings
+  // it has, and answers the rest as not controllable.
+  if (hub && !chromeApi.privacy && declares("privacy")) {
+    const setting = (name) => {
+      const onChange = hub.event(`privacy.${name}.onChange`);
       return {
-        get: (_details, callback) => withCallback(Promise.resolve(details()), callback),
-        set: (next, callback) => {
-          if (next && "value" in next) value = next.value;
-          return withCallback(Promise.resolve(), callback);
-        },
-        clear: (_details, callback) => {
-          value = initial;
-          return withCallback(Promise.resolve(), callback);
-        },
-        onChange: changed,
+        get: (_details, callback) => withCallback(native("privacy.get", { setting: name }), callback),
+        set: (details, callback) =>
+          withCallback(native("privacy.set", { setting: name, value: details && details.value }), callback),
+        clear: (_details, callback) => withCallback(native("privacy.clear", { setting: name }), callback),
+        onChange,
       };
     };
+    const group = (prefix, names) => Object.fromEntries(names.map((name) => [name, setting(`${prefix}.${name}`)]));
     pin(chromeApi, "privacy", {
-      services: {
-        // Zephium has no password or form store of its own, so these are off
-        // and left to the extension, as when it has overridden Chrome's.
-        passwordSavingEnabled: setting(false, "controlled_by_this_extension"),
-        autofillEnabled: setting(false, "controlled_by_this_extension"),
-        autofillAddressEnabled: setting(false, "controlled_by_this_extension"),
-        autofillCreditCardEnabled: setting(false, "controlled_by_this_extension"),
-        alternateErrorPagesEnabled: setting(false),
-        safeBrowsingEnabled: setting(false),
-        searchSuggestEnabled: setting(true),
-        spellingServiceEnabled: setting(false),
-        translationServiceEnabled: setting(false),
-      },
-      network: {
-        networkPredictionEnabled: setting(true),
-        webRTCIPHandlingPolicy: setting("default"),
-      },
-      websites: {
-        thirdPartyCookiesAllowed: setting(true),
-        hyperlinkAuditingEnabled: setting(false),
-        referrersEnabled: setting(true),
-        doNotTrackEnabled: setting(false),
-        protectedContentEnabled: setting(true),
-      },
+      services: group("services", [
+        "passwordSavingEnabled", "autofillEnabled", "autofillAddressEnabled", "autofillCreditCardEnabled",
+        "alternateErrorPagesEnabled", "safeBrowsingEnabled", "safeBrowsingExtendedReportingEnabled",
+        "searchSuggestEnabled", "spellingServiceEnabled", "translationServiceEnabled",
+      ]),
+      network: group("network", ["networkPredictionEnabled", "webRTCIPHandlingPolicy"]),
+      websites: group("websites", [
+        "thirdPartyCookiesAllowed", "hyperlinkAuditingEnabled", "referrersEnabled", "doNotTrackEnabled",
+        "protectedContentEnabled", "topicsEnabled", "fledgeEnabled", "adMeasurementEnabled",
+      ]),
+      IPHandlingPolicy: Object.freeze({
+        DEFAULT: "default", DEFAULT_PUBLIC_AND_PRIVATE_INTERFACES: "default_public_and_private_interfaces",
+        DEFAULT_PUBLIC_INTERFACE_ONLY: "default_public_interface_only", DISABLE_NON_PROXIED_UDP: "disable_non_proxied_udp",
+      }),
     });
   }
 

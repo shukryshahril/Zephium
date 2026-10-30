@@ -14,7 +14,7 @@ use objc2_web_kit::{
 use serde_json::Value;
 
 use crate::runtime::Shared;
-use crate::{error, json, offscreen, LogLevel};
+use crate::{api, error, idle, json, offscreen, privacy, LogLevel};
 
 pub(crate) const APPLICATION: &str = "app.zephium.webext";
 
@@ -78,7 +78,40 @@ pub(crate) fn handle(
         );
         return;
     }
+    if message.get("api").and_then(Value::as_str) == Some("permissions.request") {
+        let reply = reply.copy();
+        api::request(
+            shared,
+            context,
+            &message,
+            Box::new(move |result| respond(&reply, result)),
+        );
+        return;
+    }
+    let id = extension(context);
+    let gate = |permission: &str| {
+        if api::granted(shared, &id, permission) {
+            Ok(())
+        } else {
+            Err(format!(
+                "The extension doesn't have the '{permission}' permission."
+            ))
+        }
+    };
+    let interval = message.get("interval").and_then(Value::as_u64);
     let result = match message.get("api").and_then(Value::as_str) {
+        Some("permissions.state") => Ok(api::state(shared, context)),
+        Some("permissions.remove") => Ok(api::remove(shared, context, &message)),
+        Some("idle.query") => gate("idle").map(|()| Value::from(idle::query(interval))),
+        Some("idle.watch") => gate("idle").map(|()| {
+            idle::watch(shared, &id, interval);
+            Value::Null
+        }),
+        Some("privacy.get") => gate("privacy").and_then(|()| privacy::get(shared, &id, &message)),
+        Some("privacy.set") => gate("privacy").and_then(|()| privacy::set(shared, &id, &message)),
+        Some("privacy.clear") => {
+            gate("privacy").and_then(|()| privacy::clear(shared, &id, &message))
+        }
         Some("log") => {
             let level = match message.get("level").and_then(Value::as_str) {
                 Some("error") => LogLevel::Error,
@@ -135,6 +168,10 @@ pub(crate) fn handle(
         Some(api) => Err(format!("{api} is not supported")),
         None => Err("missing api".to_owned()),
     };
+    respond(reply, result);
+}
+
+fn respond(reply: &DynBlock<dyn Fn(*mut AnyObject, *mut NSError)>, result: Result<Value, String>) {
     match result {
         Ok(value) => {
             let object = json::to_object(&value);

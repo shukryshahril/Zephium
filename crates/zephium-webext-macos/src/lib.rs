@@ -7,13 +7,17 @@
 #![cfg(target_os = "macos")]
 
 mod access;
+mod api;
 mod bridge;
 pub mod compat;
 mod delegate;
+mod events;
+mod idle;
 mod json;
 mod lifetime;
 mod native;
 mod offscreen;
+mod privacy;
 mod runtime;
 mod socket;
 mod surface;
@@ -23,6 +27,7 @@ use std::sync::OnceLock;
 use objc2::rc::Retained;
 use objc2_foundation::{NSError, NSLocalizedDescriptionKey, NSMutableDictionary, NSString};
 
+pub use api::BROWSER_PERMISSIONS;
 pub use runtime::{ExtensionSpec, Grants, LoadedExtension, Runtime};
 
 /// A readable message for any error WebKit reports.
@@ -125,6 +130,18 @@ pub trait Host {
         let _ = request;
         done(false);
     }
+
+    /// The extension gave up access it had (`permissions.remove`); the host
+    /// keeps it from being granted again on the next start.
+    fn access_removed(&self, extension: &str, permissions: &[String], patterns: &[String]) {
+        let _ = (extension, permissions, patterns);
+    }
+
+    /// Whether the browser should offer its own password filling in this
+    /// profile; password managers turn it off through `chrome.privacy`.
+    fn password_filling_changed(&self, enabled: bool) {
+        let _ = enabled;
+    }
 }
 
 /// Closes the bridges an extension's worker opened. WebKit numbers message
@@ -134,6 +151,7 @@ pub trait Host {
 /// old connection's ping).
 pub(crate) fn worker_gone(shared: &runtime::Shared, extension: &str) {
     socket::close_extension(shared, extension);
+    events::worker_gone(shared, extension);
     native::close_extension(shared, extension);
 }
 

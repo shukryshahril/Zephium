@@ -60,6 +60,8 @@ pub struct LoadedExtension {
 pub(crate) struct Loaded {
     pub(crate) context: Retained<WKWebExtensionContext>,
     pub(crate) external_native_messaging: bool,
+    /// Granted permissions of the APIs the browser implements itself.
+    pub(crate) browser_permissions: RefCell<std::collections::BTreeSet<String>>,
 }
 
 /// One profile's state. WebKit gives an extension the same identifier in
@@ -72,6 +74,8 @@ pub(crate) struct Shared {
     pub(crate) offscreen: crate::offscreen::Documents,
     pub(crate) workers: crate::lifetime::Workers,
     pub(crate) access: crate::access::Batches,
+    pub(crate) events: crate::events::Hub,
+    pub(crate) privacy: crate::privacy::Overrides,
     pub(crate) mtm: MainThreadMarker,
 }
 
@@ -137,6 +141,8 @@ impl Runtime {
             offscreen: Default::default(),
             workers: Default::default(),
             access: Default::default(),
+            events: Default::default(),
+            privacy: Default::default(),
             mtm,
         });
         let delegate = Delegate::new(mtm, Rc::downgrade(&shared));
@@ -573,6 +579,7 @@ fn activate(
         context.setInspectable(spec.inspectable);
     }
     apply_grants(shared.mtm, &context, extension, &spec.grants);
+    let browser_permissions = RefCell::new(crate::api::initial(extension, &spec.grants));
     unsafe { controller.loadExtensionContext_error(&context) }
         .map_err(|error| describe(Some(&error)))?;
 
@@ -595,6 +602,7 @@ fn activate(
         Loaded {
             context,
             external_native_messaging: spec.external_native_messaging,
+            browser_permissions,
         },
     );
     Ok(loaded)
@@ -707,13 +715,16 @@ pub(crate) fn describe(error: Option<&NSError>) -> String {
     }
 }
 
-fn unload(shared: &Shared, controller: &WKWebExtensionController, id: &str) -> bool {
+fn unload(shared: &Rc<Shared>, controller: &WKWebExtensionController, id: &str) -> bool {
     let Some(loaded) = shared.loaded.borrow_mut().remove(id) else {
         return false;
     };
     crate::offscreen::close(shared, id);
     crate::worker_gone(shared, id);
     crate::lifetime::forget(shared, id);
+    crate::events::forget(shared, id);
+    crate::idle::forget(shared, id);
+    crate::privacy::forget(shared, id);
     unsafe { controller.unloadExtensionContext_error(&loaded.context) }.is_ok()
 }
 

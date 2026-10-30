@@ -386,7 +386,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["bookmarks", "history", "idle", "notifications", "privacy", "webRequestAuthProvider"]);
+  const BROWSER_PERMISSIONS = new Set(["bookmarks", "history", "idle", "notifications", "privacy", "topSites", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -678,6 +678,10 @@
       onVisited: dataEvent("history.onVisited"),
       onVisitRemoved: dataEvent("history.onVisitRemoved"),
     });
+  }
+
+  if (!isContent && !chromeApi.topSites && declares("topSites")) {
+    pin(chromeApi, "topSites", { get: (callback) => withCallback(native("topSites.get", {}), callback) });
   }
 
   // Chrome's root "0" stands above the browser's top level; there is no

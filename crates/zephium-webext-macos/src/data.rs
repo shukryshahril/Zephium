@@ -10,7 +10,7 @@ use zephium_core::extension_data::{
 };
 
 use crate::runtime::Shared;
-use crate::{api, bookmarks, events, history};
+use crate::{api, bookmarks, events, history, top_sites};
 
 pub(crate) type Done = Box<dyn FnOnce(Result<Value, String>)>;
 pub(crate) type Answer = Box<dyn FnOnce(ExtensionDataReply) -> Result<Value, String>>;
@@ -24,7 +24,9 @@ pub(crate) struct Call {
 }
 
 pub(crate) fn handles(api: &str) -> bool {
-    api.starts_with("history.") || api.starts_with("bookmarks.")
+    ["history.", "bookmarks.", "topSites."]
+        .iter()
+        .any(|namespace| api.starts_with(namespace))
 }
 
 pub(crate) fn request(
@@ -37,6 +39,7 @@ pub(crate) fn request(
     let call = match api.split_once('.') {
         Some(("history", op)) => history::call(op, message),
         Some(("bookmarks", op)) => bookmarks::call(op, message),
+        Some(("topSites", op)) => top_sites::call(op, message),
         _ => Err(format!("{api} is not supported")),
     };
     let Call {

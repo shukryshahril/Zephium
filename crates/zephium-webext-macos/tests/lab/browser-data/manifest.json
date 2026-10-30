@@ -5,6 +5,7 @@
   "permissions": [
     "history",
     "bookmarks",
+    "topSites",
     "storage"
   ],
   "background": {

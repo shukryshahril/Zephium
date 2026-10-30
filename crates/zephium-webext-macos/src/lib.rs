@@ -27,6 +27,7 @@ mod privacy;
 mod runtime;
 mod socket;
 mod surface;
+mod top_sites;
 
 use std::sync::OnceLock;
 

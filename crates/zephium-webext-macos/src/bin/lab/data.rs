@@ -9,7 +9,7 @@ use zephium_core::bookmarks::{
 };
 use zephium_core::extension_data::{
     ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
-    HistoryEntry, HistoryReply, HistoryRequest, VisitEntry,
+    HistoryEntry, HistoryReply, HistoryRequest, TopSite, VisitEntry,
 };
 
 pub struct LabData {
@@ -145,6 +145,22 @@ impl LabData {
                 )
             }
             HistoryRequest::Address { .. } => (ExtensionDataReply::Unavailable, None),
+            HistoryRequest::MostVisited { limit } => {
+                let mut sites: Vec<_> = history.iter().collect();
+                sites.sort_by_key(|entry| std::cmp::Reverse(entry.visits));
+                let sites = sites
+                    .into_iter()
+                    .take(limit as usize)
+                    .map(|entry| TopSite {
+                        url: entry.url.clone(),
+                        title: entry.title.clone(),
+                    })
+                    .collect();
+                (
+                    ExtensionDataReply::History(HistoryReply::Sites(sites)),
+                    None,
+                )
+            }
             HistoryRequest::Add { url } => {
                 let id = self.next.replace(self.next.get() + 1);
                 let entry = HistoryEntry {

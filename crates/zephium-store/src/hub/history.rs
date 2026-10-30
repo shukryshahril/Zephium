@@ -3,8 +3,8 @@
 use super::*;
 
 use zephium_core::extension_data::{
-    HistoryEntry, HistoryReply, HistoryRequest, VisitEntry,
-    MAX_HISTORY_RESULTS as MAX_EXTENSION_RESULTS, MAX_REMOVED_URLS, MAX_VISITS,
+    HistoryEntry, HistoryReply, HistoryRequest, TopSite, VisitEntry,
+    MAX_HISTORY_RESULTS as MAX_EXTENSION_RESULTS, MAX_REMOVED_URLS, MAX_TOP_SITES, MAX_VISITS,
 };
 use zephium_core::item::sanitize_page_title;
 use zephium_core::ports::store::{
@@ -27,6 +27,8 @@ const MAX_SUBMITTED_SEARCHES: i64 = 1024;
 pub(crate) const MAX_HISTORY_PAGE: u32 = 200;
 /// Addresses one forget request may name.
 pub(crate) const MAX_HISTORY_FORGET_URLS: usize = 100;
+/// The most visited sites are counted over this much recent history.
+const MOST_VISITED_WINDOW_SECONDS: i64 = 90 * 24 * 60 * 60;
 /// A title arriving later than this belongs to a different visit.
 const TITLE_AMENDMENT_WINDOW_SECONDS: i64 = 60;
 
@@ -894,6 +896,36 @@ fn extension_history(
             visits.reverse();
             Ok(HistoryReply::Visits(visits))
         }
+        HistoryRequest::MostVisited { limit } => {
+            let limit = limit.min(MAX_TOP_SITES);
+            let since = now_secs().saturating_sub(MOST_VISITED_WINDOW_SECONDS);
+            let sites = conn
+                .prepare_cached(
+                    "SELECT g.url, t.title FROM (
+                         SELECT url, COUNT(*) AS visits, MAX(id) AS newest FROM history
+                         WHERE visited_at >= ?1 AND length(CAST(url AS BLOB)) <= ?3
+                           AND (url LIKE 'https://%' OR url LIKE 'http://%')
+                         GROUP BY url ORDER BY visits DESC, newest DESC LIMIT ?2
+                     ) g JOIN history t ON t.id = g.newest
+                     ORDER BY g.visits DESC, g.newest DESC",
+                )?
+                .query_map(params![since, limit * 2, MAX_URL_BYTES as i64], |row| {
+                    Ok(TopSite {
+                        url: row.get(0)?,
+                        title: row.get(1)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .filter(|site| navigation::is_allowed_str(&site.url))
+                .map(|mut site| {
+                    site.title = sanitize_page_title(&site.title);
+                    site
+                })
+                .take(limit as usize)
+                .collect();
+            Ok(HistoryReply::Sites(sites))
+        }
         HistoryRequest::RemoveUrl { url } => {
             let tx = conn.transaction()?;
             let visits = tx.execute("DELETE FROM history WHERE url = ?1", [&url])?;
@@ -1132,6 +1164,19 @@ mod extension_tests {
             ("https://b.example/", "B", now - 5),
             ("https://b.example/", "B", now - 4),
         ]);
+        assert_eq!(
+            extension_history(&mut conn, HistoryRequest::MostVisited { limit: 5 }).unwrap(),
+            HistoryReply::Sites(vec![
+                TopSite {
+                    url: "https://b.example/".into(),
+                    title: "B".into()
+                },
+                TopSite {
+                    url: "https://a.example/".into(),
+                    title: "A".into()
+                },
+            ])
+        );
         assert_eq!(
             extension_history(
                 &mut conn,

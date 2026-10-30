@@ -41,6 +41,8 @@ function context(kind, declared = []) {
             return message.id;
           case "idle.query":
             return message.interval >= 15 ? "active" : "invalid";
+          case "topSites.get":
+            return [{ url: "https://a.example/", title: "A" }];
           case "bookmarks.create":
             return { id: "9", parentId: message.details.parentId, index: 0, title: message.details.title };
           case "history.search":
@@ -405,6 +407,16 @@ test("browser data namespaces exist only when declared and pass Chrome's argumen
     assert.equal(typeof chrome.history.onVisitRemoved.hasListeners, "function", kind);
   }
   assert.equal(context("content", ["history"]).chrome.history, undefined, "not in content scripts");
+});
+
+test("top sites are read from the browser", async () => {
+  assert.equal(context("worker").chrome.topSites, undefined);
+  const { chrome } = context("worker", ["topSites"]);
+  assert.equal((await chrome.topSites.get())[0].url, "https://a.example/");
+  let heard;
+  chrome.topSites.get((sites) => (heard = sites.length));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(heard, 1);
 });
 
 test("bookmarks pass ids and details through as Chrome takes them", async () => {

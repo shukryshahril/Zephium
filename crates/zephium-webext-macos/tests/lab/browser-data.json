@@ -13,6 +13,10 @@
     "sleep": 800
   },
   {
+    "eval": "return { sites: (await chrome.topSites.get()).map((site) => [site.url, site.title]), callback: await new Promise((res) => chrome.topSites.get((sites) => res(sites.length))) };",
+    "in": "page"
+  },
+  {
     "eval": "const r = {}; r.search = (await chrome.history.search({ text: '', startTime: 0 })).map((i) => [i.id, i.url, i.visitCount, typeof i.lastVisitTime, i.typedCount]); r.visits = (await chrome.history.getVisits({ url: 'https://docs.example/guide' })).map((v) => [v.id, v.transition]).slice(0, 2); const visited = new Promise((res) => chrome.history.onVisited.addListener(function l(item) { chrome.history.onVisited.removeListener(l); res(item.url); })); const removed = new Promise((res) => chrome.history.onVisitRemoved.addListener(res)); await new Promise((res) => setTimeout(res, 400)); await chrome.history.addUrl({ url: 'https://added.example/' }); r.visited = await visited; await chrome.history.deleteUrl({ url: 'https://news.example/' }); r.removed = await removed; r.callback = await new Promise((res) => chrome.history.search({ text: 'guide', startTime: 0 }, (items) => res([items.length, chrome.runtime.lastError || null]))); r.badUrl = await chrome.history.addUrl({ url: 'nope' }).catch((e) => e.message); await chrome.history.deleteAll(); r.after = (await chrome.history.search({ text: '', startTime: 0 })).length; return r;",
     "in": "page",
     "timeout": 8000

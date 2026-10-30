@@ -69,11 +69,6 @@ const GAPS: &[(&[Uses], &str, u8)] = &[
         "Can't restore recently closed tabs",
         MAC,
     ),
-    (
-        &[Permission("topSites")],
-        "Can't read your most visited sites",
-        MAC,
-    ),
     (&[Permission("tabGroups")], "Can't manage tab groups", MAC),
     (
         &[Permission("readingList")],
@@ -272,7 +267,8 @@ mod tests {
 
     #[test]
     fn browser_data_the_browser_keeps_is_not_named() {
-        let raw = json!({"manifest_version": 3, "permissions": ["history", "bookmarks"]});
+        let raw =
+            json!({"manifest_version": 3, "permissions": ["history", "bookmarks", "topSites"]});
         assert!(assess(raw, Platform::Macos).is_empty());
     }
 

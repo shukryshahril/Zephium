@@ -8,6 +8,7 @@ use crate::bookmarks::{BookmarkChange, BookmarkReply, BookmarkRequest};
 pub const MAX_HISTORY_RESULTS: u32 = 1_000;
 /// Visits one address lists.
 pub const MAX_VISITS: u32 = 1_000;
+pub const MAX_TOP_SITES: u32 = 10;
 /// Addresses one removal names. Past it, listeners hear that all history
 /// went, which tells them to drop whatever they cached.
 pub const MAX_REMOVED_URLS: usize = 1_000;
@@ -34,6 +35,12 @@ pub struct VisitEntry {
     pub visited_at: i64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TopSite {
+    pub url: String,
+    pub title: String,
+}
+
 /// Times are unix seconds; ranges include `start` and exclude `end`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HistoryRequest {
@@ -51,6 +58,10 @@ pub enum HistoryRequest {
     /// The one address, for the event about a visit to it.
     Address {
         url: String,
+    },
+    /// Web addresses visited most over recent weeks.
+    MostVisited {
+        limit: u32,
     },
     /// A visit now, as if the page had been opened; the shell records it.
     Add {
@@ -70,6 +81,7 @@ pub enum HistoryRequest {
 pub enum HistoryReply {
     Entries(Vec<HistoryEntry>),
     Visits(Vec<VisitEntry>),
+    Sites(Vec<TopSite>),
     /// `urls` lost their last visit; `all` when every visit went, or more
     /// addresses than [`MAX_REMOVED_URLS`] did.
     Removed {
@@ -101,7 +113,7 @@ impl ExtensionDataCall {
                 | HistoryRequest::RemoveUrl { url } => address(url),
                 HistoryRequest::Add { url } => crate::navigation::is_allowed_str(url),
                 HistoryRequest::RemoveRange { start, end } => start <= end,
-                HistoryRequest::RemoveAll => true,
+                HistoryRequest::MostVisited { .. } | HistoryRequest::RemoveAll => true,
             },
             Self::Bookmarks(request) => match request {
                 BookmarkRequest::Entries { ids } => {

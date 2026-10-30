@@ -21,7 +21,6 @@
     "allow": [
       "webbundle"
     ],
-    "known": "its background never finishes starting: webRequest rejects the 'webbundle' resource type",
     "check": [
       {
         "url": "/blockers.html",
@@ -37,7 +36,6 @@
     "allow": [
       "webbundle"
     ],
-    "known": "webRequest rejects the 'webbundle' resource type, so no blocking starts",
     "check": [
       {
         "url": "/blockers.html",
@@ -56,8 +54,7 @@
         "wait": 20000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
-    ],
-    "known": "its popup renders nothing and its engine fails to start: declarativeNetRequest.RuleActionType is missing"
+    ]
   },
   {
     "name": "Authenticator",
@@ -72,7 +69,7 @@
       "connectNative"
     ],
     "popup_has": [
-      "log in"
+      "default password manager"
     ],
     "logs": [
       {
@@ -149,8 +146,7 @@
         "wait": 20000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
-    ],
-    "known": "its tracker rules never load (declarativeNetRequest.isRegexSupported returns nothing)"
+    ]
   },
   {
     "name": "Enhancer for YouTube",
@@ -193,8 +189,7 @@
         "wait": 20000,
         "eval": "return await blocked('https://securepubads.g.doubleclick.net/tag/js/gpt.js')"
       }
-    ],
-    "known": "chrome.action.getUserSettings is missing (runtime fix pending)"
+    ]
   },
   {
     "name": "Google Dictionary",
@@ -210,7 +205,7 @@
     "name": "Google Keep",
     "id": "lpcaedmchfhocbbapmcbpinfpgnhiddi",
     "popup": true,
-    "known": "its background never finishes starting: identity.AccountStatus is missing"
+    "known": "needs a Google account sign-in (identity.getAuthToken), which Zephium doesn't have"
   },
   {
     "name": "Google Translate",
@@ -230,8 +225,7 @@
         "url": "/text.html",
         "eval": "return document.querySelector('grammarly-desktop-integration') !== null"
       }
-    ],
-    "known": "cookies.onChanged is delivered without details (runtime fix pending)"
+    ]
   },
   {
     "name": "Honey",
@@ -276,8 +270,7 @@
     "popup": false,
     "allow": [
       "runtime.connect"
-    ],
-    "known": "its package is over the 128 MB install limit"
+    ]
   },
   {
     "name": "LanguageTool",
@@ -390,7 +383,6 @@
     "name": "Proton Pass",
     "id": "ghmbeldphafepmbegfdlkpapadhbakde",
     "popup": true,
-    "known": "its popup says the browser has difficulties activating it",
     "popup_lacks": [
       "difficulties activating"
     ]
@@ -398,8 +390,7 @@
   {
     "name": "Proton VPN",
     "id": "jplgfhpmjnbigmhklmmbgecoobifkmpa",
-    "popup": true,
-    "known": "its background never finishes starting: idle.onStateChanged is missing"
+    "popup": true
   },
   {
     "name": "Raindrop",

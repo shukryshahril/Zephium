@@ -843,6 +843,13 @@
   }
 
   const webRequest = !isContent && namespace("webRequest");
+  if (webRequest && typeof webRequest.handlerBehaviorChanged !== "function") {
+    // WebKit keeps no in-memory cache of listener decisions to flush.
+    pin(webRequest, "handlerBehaviorChanged", (callback) => withCallback(Promise.resolve(), callback));
+    if (webRequest.MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES === undefined) {
+      pin(webRequest, "MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES", 20);
+    }
+  }
   if (webRequest) {
     const headers = { REQUEST_HEADERS: "requestHeaders", RESPONSE_HEADERS: "responseHeaders" };
     const BLOCKING = "blocking";
@@ -902,6 +909,44 @@
     HeaderOperation: { APPEND: "append", SET: "set", REMOVE: "remove" },
     UnsupportedRegexReason: { SYNTAX_ERROR: "syntaxError", MEMORY_LIMIT_EXCEEDED: "memoryLimitExceeded" },
   });
+  if (netRequest) {
+    for (const [name, value] of Object.entries({
+      GUARANTEED_MINIMUM_STATIC_RULES: 30000, MAX_NUMBER_OF_STATIC_RULESETS: 100, MAX_NUMBER_OF_ENABLED_STATIC_RULESETS: 50,
+      MAX_NUMBER_OF_DYNAMIC_RULES: 30000, MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES: 5000, MAX_NUMBER_OF_SESSION_RULES: 5000,
+      MAX_NUMBER_OF_UNSAFE_SESSION_RULES: 5000, MAX_NUMBER_OF_REGEX_RULES: 1000, SESSION_RULESET_ID: "_session", DYNAMIC_RULESET_ID: "_dynamic",
+    })) {
+      if (netRequest[name] === undefined) pin(netRequest, name, value);
+    }
+    // Chrome counts what is left of its guaranteed minimum; WebKit keeps no
+    // such pool, so the minimum is what is offered.
+    if (typeof netRequest.getAvailableStaticRuleCount !== "function") {
+      pin(netRequest, "getAvailableStaticRuleCount", (callback) =>
+        withCallback(Promise.resolve(netRequest.GUARANTEED_MINIMUM_STATIC_RULES), callback),
+      );
+    }
+    // WebKit's rule compiler takes JavaScript-like expressions without
+    // lookaround or backreferences.
+    const regexSupport = (options) => {
+      const source = String((options && options.regex) || "");
+      try {
+        new RegExp(source, options && options.isCaseSensitive === false ? "i" : "");
+      } catch {
+        return { isSupported: false, reason: "syntaxError" };
+      }
+      return /\(\?<?[=!]|\\[1-9]/.test(source) ? { isSupported: false, reason: "syntaxError" } : { isSupported: true };
+    };
+    const isRegexSupported = netRequest.isRegexSupported;
+    pin(netRequest, "isRegexSupported", (options, callback) => {
+      let native;
+      try {
+        native = typeof isRegexSupported === "function" ? isRegexSupported.call(netRequest, options) : undefined;
+      } catch {}
+      const answer = Promise.resolve(native)
+        .catch(() => undefined)
+        .then((result) => (result && typeof result.isSupported === "boolean" ? result : regexSupport(options)));
+      return withCallback(answer, callback);
+    });
+  }
   if (netRequest) {
     const rejected = /rule at index (\d+)/;
     for (const method of ["updateSessionRules", "updateDynamicRules"]) {

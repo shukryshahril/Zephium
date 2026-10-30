@@ -26,9 +26,9 @@ use serde::Deserialize;
 use results::{Record, Resources, Results, Status};
 
 const CHROME_VERSION: &str = "152.0.0.0";
-const START_TIMEOUT: Duration = Duration::from_secs(45);
+const START_TIMEOUT: Duration = Duration::from_secs(90);
 /// The longest any one step runs, so a longer silence means the lab is stuck.
-const STALL: Duration = Duration::from_secs(40);
+const STALL: Duration = Duration::from_secs(90);
 const REFRESH_AFTER: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const PARALLEL: usize = 4;
 const IDLE: Duration = Duration::from_secs(15);

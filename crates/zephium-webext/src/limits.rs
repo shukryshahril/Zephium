@@ -64,11 +64,6 @@ const GAPS: &[(&[Uses], &str, u8)] = &[
         MAC,
     ),
     (
-        &[Permission("webRequestAuthProvider")],
-        "Can't supply logins for websites' sign-in prompts",
-        MAC,
-    ),
-    (
         &[Permission("history")],
         "Can't read your browsing history",
         MAC,
@@ -212,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn a_password_manager_loses_its_login_prompts_and_most_privacy_settings() {
+    fn a_password_manager_keeps_its_sign_in_answers_and_password_settings() {
         let raw = json!({
             "manifest_version": 3,
             "permissions": ["storage", "privacy", "webRequest", "webRequestAuthProvider",
@@ -220,10 +215,7 @@ mod tests {
         });
         assert_eq!(
             assess(raw.clone(), Platform::Macos),
-            [
-                "Can't supply logins for websites' sign-in prompts",
-                "Can only change password and autofill privacy settings",
-            ]
+            ["Can only change password and autofill privacy settings"]
         );
         assert_eq!(
             assess(raw, Platform::Windows),

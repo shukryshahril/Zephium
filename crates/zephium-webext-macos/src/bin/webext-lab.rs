@@ -9,9 +9,11 @@
 //! - `{"background": true}` starts the last loaded extension's background
 //! - `{"tab": "<url>"}` opens a tab and waits for it to load
 //! - `{"page": "<path>"}` opens one of the extension's pages in a probe view
-//! - `{"eval": "<async function body>", "in": "page" | "tab", "timeout": 5000}`
+//! - `{"eval": "<async function body>", "in": "page" | "tab", "timeout": 5000,
+//!   "as": "<label>"}` prints `RESULT <label> <value>` when labelled
 //! - `{"keys": "<text>", "in": "tab" | "page"}` types real key presses
-//! - `{"sleep": <ms>}`
+//! - `{"sleep": <ms>}`; `{"mark": "<name>"}` prints `MARK <name>`
+//! - `{"close": "tab" | "popup"}` closes the active tab or the popup
 //! - `{"auth": "<url>"}` offers a sign-in challenge for `url` to extensions
 //! - `{"unload": true}` unloads the last loaded extension; `{"erase": true}`
 //!   unloads it and erases its stored data
@@ -360,8 +362,13 @@ impl Lab {
                 println!("EVAL SKIPPED: no view");
                 return next();
             };
+            let label = step
+                .get("as")
+                .and_then(Value::as_str)
+                .map(|label| format!("{label} "))
+                .unwrap_or_default();
             evaluate(this.mtm, &view, body, timeout, move |result| {
-                println!("RESULT {result}");
+                println!("RESULT {label}{result}");
                 next();
             });
         } else if step.get("action").is_some() {
@@ -377,11 +384,14 @@ impl Lab {
                     ticks.set(ticks.get() + 1);
                     waiting.page.borrow().is_some() || ticks.get() > 100
                 },
-                move || match lab.page.borrow().clone() {
-                    Some(view) => wait_loaded(view, next),
-                    None => {
-                        println!("NO POPUP");
-                        next()
+                move || {
+                    let view = lab.page.borrow().clone();
+                    match view {
+                        Some(view) => wait_loaded(view, next),
+                        None => {
+                            println!("NO POPUP");
+                            next()
+                        }
                     }
                 },
             );
@@ -423,6 +433,31 @@ impl Lab {
                 println!("ERASED");
                 after(1500, next);
             });
+        } else if let Some(name) = step.get("mark").and_then(Value::as_str) {
+            println!("MARK {name}");
+            next();
+        } else if let Some(what) = step.get("close").and_then(Value::as_str) {
+            match what {
+                "popup" => {
+                    let view = this.page.borrow_mut().take();
+                    if let Some(view) = view {
+                        view.removeFromSuperview();
+                    }
+                }
+                _ => {
+                    let active = this.active.get();
+                    this.tabs.borrow_mut().retain(|(id, view)| {
+                        if *id == active {
+                            view.removeFromSuperview();
+                        }
+                        *id != active
+                    });
+                    let last = this.tabs.borrow().last().map_or(0, |(id, _)| *id);
+                    this.active.set(last);
+                    this.publish();
+                }
+            }
+            after(300, next);
         } else if let Some(ms) = step.get("sleep").and_then(Value::as_u64) {
             after(ms, next);
         } else {

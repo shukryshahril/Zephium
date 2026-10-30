@@ -720,7 +720,7 @@ impl Shell {
         }
     }
 
-    fn sync_extension_browser_surface_metadata(&mut self, id: ItemId) {
+    pub(super) fn sync_extension_browser_surface_metadata(&mut self, id: ItemId) {
         let Some(profile) = self.profile_of_item(id) else {
             return;
         };

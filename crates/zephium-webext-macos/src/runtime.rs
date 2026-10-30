@@ -471,6 +471,37 @@ impl Runtime {
         }
     }
 
+    /// The tab's mute and whether it is playing sound, as the browser shows
+    /// them; `tabs.onUpdated` hears of a change.
+    pub fn set_audio(&self, tab: u64, muted: bool, audible: bool) {
+        let Some(tab) = self.shared.graph.borrow().tab(tab) else {
+            return;
+        };
+        use objc2_web_kit::WKWebExtensionTabChangedProperties as Properties;
+        let mut properties = Properties::empty();
+        let (muted, audible) = tab.set_audio(muted, audible);
+        if muted {
+            properties |= Properties::Muted;
+        }
+        if audible {
+            properties |= Properties::PlayingAudio;
+        }
+        if !properties.is_empty() {
+            unsafe {
+                self.controller
+                    .didChangeTabProperties_forTab(properties, ProtocolObject::from_ref(&*tab))
+            };
+        }
+    }
+
+    /// The native window showing one of the published windows, through which
+    /// extensions read and change its frame and state.
+    pub fn bind_window(&self, window: u64, native: Option<&objc2_app_kit::NSWindow>) {
+        if let Some(window) = self.shared.graph.borrow().window(window) {
+            window.set_native(native);
+        }
+    }
+
     /// Associates a tab with the web view currently showing it.
     pub fn bind_view(&self, tab: u64, view: Option<&WKWebView>) {
         if let Some(tab) = self.shared.graph.borrow().tab(tab) {

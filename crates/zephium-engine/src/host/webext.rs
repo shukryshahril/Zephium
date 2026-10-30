@@ -296,6 +296,7 @@ impl WebextHost {
         &mut self,
         surface: &ExtensionBrowserSurface,
         view_for: impl Fn(ItemId) -> Option<Retained<WKWebView>>,
+        window_for: impl Fn(WindowId) -> Option<Retained<objc2_app_kit::NSWindow>>,
     ) {
         let Some(entry) = self.profiles.get_mut(&surface.profile()) else {
             return;
@@ -328,6 +329,20 @@ impl WebextHost {
             .focused()
             .map(|window| entry.bridge.ids.borrow_mut().window(window));
         entry.runtime.publish(&windows, focused);
+        for window in surface
+            .windows()
+            .iter()
+            .filter(|window| !window.is_private())
+        {
+            let id = entry.bridge.ids.borrow_mut().window(window.id());
+            entry
+                .runtime
+                .bind_window(id, window_for(window.id()).as_deref());
+            for tab in window.tabs() {
+                let id = entry.bridge.ids.borrow_mut().tab(tab.id());
+                entry.runtime.set_audio(id, tab.muted(), tab.audible());
+            }
+        }
         let open: std::collections::HashSet<ItemId> = surface.tabs().map(|tab| tab.id()).collect();
         settle_abandoned_auth_flows(surface.profile(), &open);
         // The engine's own views are the truth for residency; the shell's flag
@@ -1403,6 +1418,35 @@ impl Host for Bridge {
                 Some(tab) => ExtensionBrowserRequestAction::GoForward { tab },
                 None => return done(Err("No tab with that id.".into())),
             },
+            TabRequest::Duplicate { tab: id } => match tab(id) {
+                Some(tab) => ExtensionBrowserRequestAction::DuplicateTab { tab },
+                None => return done(Err("No tab with that id.".into())),
+            },
+            TabRequest::Mute { tab: id, muted } => match tab(id) {
+                Some(tab) => ExtensionBrowserRequestAction::SetTabMuted { tab, muted },
+                None => return done(Err("No tab with that id.".into())),
+            },
+            TabRequest::Zoom { tab: id, factor } => {
+                let percent = factor.map(|factor| (factor * 100.0).round());
+                if percent.is_some_and(|percent| {
+                    !(f64::from(zephium_core::zoom::MIN_PERCENT)
+                        ..=f64::from(zephium_core::zoom::MAX_PERCENT))
+                        .contains(&percent)
+                }) {
+                    return done(Err(format!(
+                        "Zoom factor must be between {} and {}.",
+                        zephium_core::zoom::scale(zephium_core::zoom::MIN_PERCENT),
+                        zephium_core::zoom::scale(zephium_core::zoom::MAX_PERCENT)
+                    )));
+                }
+                match tab(id) {
+                    Some(tab) => ExtensionBrowserRequestAction::SetTabZoom {
+                        tab,
+                        percent: percent.map(|percent| percent as u16),
+                    },
+                    None => return done(Err("No tab with that id.".into())),
+                }
+            }
             TabRequest::Pin { .. } | TabRequest::FocusWindow { .. } => {
                 return done(Ok(None));
             }

@@ -82,6 +82,19 @@ pub enum TabRequest {
     FocusWindow {
         window: u64,
     },
+    /// Done with the copy.
+    Duplicate {
+        tab: u64,
+    },
+    Mute {
+        tab: u64,
+        muted: bool,
+    },
+    /// `None` restores the browser's default level.
+    Zoom {
+        tab: u64,
+        factor: Option<f64>,
+    },
 }
 
 /// Completion for a [`TabRequest`]: the created or affected tab, or a message

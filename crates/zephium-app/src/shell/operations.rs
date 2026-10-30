@@ -173,6 +173,17 @@ impl Shell {
     }
 
     fn operation_duplicate(&mut self, id: ItemId) -> OperationDisposition {
+        match self.duplicate_tab(id) {
+            Ok((_, native)) => mutation_result(native),
+            Err(disposition) => disposition,
+        }
+    }
+
+    /// Opens a copy of `id`'s page right after it in the focused space.
+    pub(super) fn duplicate_tab(
+        &mut self,
+        id: ItemId,
+    ) -> Result<(ItemId, NativeWork), OperationDisposition> {
         let Some(url) = self
             .items
             .tab(id)
@@ -180,16 +191,22 @@ impl Shell {
             .and_then(|tab| tab.url.as_ref())
             .map(ToString::to_string)
         else {
-            return operation_result(OperationOutcome::NoOp, OperationReason::InvalidInput);
+            return Err(operation_result(
+                OperationOutcome::NoOp,
+                OperationReason::InvalidInput,
+            ));
         };
         let Some(space) = self.windows.focused().map(|window| window.space) else {
-            return operation_result(OperationOutcome::Rejected, OperationReason::NoFocusedWindow);
+            return Err(operation_result(
+                OperationOutcome::Rejected,
+                OperationReason::NoFocusedWindow,
+            ));
         };
         let Some((copy, mut effects)) = self.open_tab_with_id() else {
-            return operation_result(
+            return Err(operation_result(
                 OperationOutcome::Rejected,
                 OperationReason::ItemLimitReached,
-            );
+            ));
         };
         let today = Placement::Space {
             space,
@@ -201,7 +218,7 @@ impl Shell {
             self.items.move_tab_to_root(copy, today, before);
         }
         effects.extend(self.items.navigate(copy, &url));
-        mutation_result(self.commit(effects))
+        Ok((copy, self.commit(effects)))
     }
 
     /// Closes the space's open tabs other than `id`, or only those after it.

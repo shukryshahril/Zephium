@@ -107,6 +107,15 @@ impl Shell {
                 ExtensionBrowserRequestAction::GoForward { tab } => {
                     self.extension_traverse_history(profile, *tab, true)
                 }
+                ExtensionBrowserRequestAction::DuplicateTab { tab } => {
+                    self.extension_duplicate_tab(profile, *tab)
+                }
+                ExtensionBrowserRequestAction::SetTabMuted { tab, muted } => {
+                    self.extension_set_tab_muted(profile, *tab, *muted)
+                }
+                ExtensionBrowserRequestAction::SetTabZoom { tab, percent } => {
+                    self.extension_set_tab_zoom(profile, *tab, *percent)
+                }
             }
         };
 
@@ -335,6 +344,64 @@ impl Shell {
         })
     }
 
+    fn extension_duplicate_tab(
+        &mut self,
+        profile: ProfileId,
+        tab: ItemId,
+    ) -> ExtensionBrowserRequestSettlement {
+        if !self.extension_tab_in_scope(tab, profile) || !self.item_in_focused_scope(tab) {
+            return rejected(ExtensionBrowserRequestRejection::InvalidScope);
+        }
+        match self.duplicate_tab(tab) {
+            Ok((copy, native)) if !native.rejected => ExtensionBrowserRequestSettlement::Applied(
+                ExtensionBrowserRequestResult::CreatedTab(copy),
+            ),
+            Ok(_) => rejected(ExtensionBrowserRequestRejection::NativeAdmissionFailed),
+            Err(disposition) => settle_disposition(&disposition),
+        }
+    }
+
+    fn extension_set_tab_muted(
+        &mut self,
+        profile: ProfileId,
+        tab: ItemId,
+        muted: bool,
+    ) -> ExtensionBrowserRequestSettlement {
+        if !self.extension_tab_in_scope(tab, profile) {
+            return rejected(ExtensionBrowserRequestRejection::InvalidScope);
+        }
+        settle_disposition(&self.operation_set_tab_muted(tab, muted))
+    }
+
+    /// Sets the level a person would by zooming the tab, so its site keeps it.
+    fn extension_set_tab_zoom(
+        &mut self,
+        profile: ProfileId,
+        tab: ItemId,
+        percent: Option<u16>,
+    ) -> ExtensionBrowserRequestSettlement {
+        let percent = percent.unwrap_or(self.zoom.default_percent);
+        if !zephium_core::zoom::valid_percent(percent) {
+            return rejected(ExtensionBrowserRequestRejection::InvalidRequest);
+        }
+        let Some(state) = self.extension_resident_tab(profile, tab) else {
+            return self.extension_tab_mutation_refusal(profile, tab);
+        };
+        if state.content != zephium_core::item::TabContent::Web {
+            return rejected(ExtensionBrowserRequestRejection::InvalidRequest);
+        }
+        let current = self
+            .zoom
+            .pending
+            .get(&tab)
+            .map_or(state.zoom, |pending| pending.desired_scale);
+        let target = zephium_core::zoom::scale(percent);
+        if zephium_core::zoom::percent(current) == percent {
+            return applied();
+        }
+        settle_native_dispatch(self.request_zoom(tab, target, super::zoom::ZoomOrigin::Person))
+    }
+
     fn extension_resident_tab(&self, profile: ProfileId, tab: ItemId) -> Option<&TabState> {
         if !self.extension_tab_in_scope(tab, profile) {
             return None;
@@ -371,6 +438,29 @@ const fn settle_native_dispatch(dispatch: NativeDispatch) -> ExtensionBrowserReq
             rejected(ExtensionBrowserRequestRejection::NativeAdmissionFailed)
         }
         NativeDispatch::Unsupported => rejected(ExtensionBrowserRequestRejection::Unsupported),
+    }
+}
+
+fn settle_disposition(disposition: &OperationDisposition) -> ExtensionBrowserRequestSettlement {
+    match (disposition.outcome, disposition.reason) {
+        (OperationOutcome::Applied | OperationOutcome::NoOp | OperationOutcome::Deferred, _)
+            if disposition.reason != OperationReason::InvalidInput =>
+        {
+            applied()
+        }
+        (OperationOutcome::NativeAdmissionFailed, _) => {
+            rejected(ExtensionBrowserRequestRejection::NativeAdmissionFailed)
+        }
+        (_, OperationReason::UnsupportedCommand) => {
+            rejected(ExtensionBrowserRequestRejection::Unsupported)
+        }
+        (_, OperationReason::InvalidScope | OperationReason::NoFocusedWindow) => {
+            rejected(ExtensionBrowserRequestRejection::InvalidScope)
+        }
+        (_, OperationReason::ItemLimitReached) => {
+            rejected(ExtensionBrowserRequestRejection::CapacityExceeded)
+        }
+        _ => rejected(ExtensionBrowserRequestRejection::InvalidRequest),
     }
 }
 

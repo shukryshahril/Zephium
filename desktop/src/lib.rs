@@ -262,8 +262,11 @@ const PRE_SHELL_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 const PRIVILEGED_PERMISSIONS_POLICY: &str = "accelerometer=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(self), compute-pressure=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), join-ad-interest-group=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), speaker-selection=(), storage-access=(), sync-xhr=(), unload=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()";
 const PRIVILEGED_BOOTSTRAP_URL: &str = "about:blank";
+// The chrome and launcher load their own pages, so a warm spare renderer
+// waiting for another site would mostly sit in memory.
 #[cfg(any(target_os = "windows", test))]
-const PRIVILEGED_WEBVIEW2_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
+const PRIVILEGED_WEBVIEW2_BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,SpareRendererForSitePerProcess";
 
 #[derive(Clone)]
 struct ShutdownCoordinator {
@@ -6652,8 +6655,8 @@ pub fn run() {
                 .background_color(tauri::utils::config::Color(0, 0, 0, 0))
                 .data_directory(privileged_runtime.main.clone())
                 // Supplying any explicit value replaces Wry's default, which
-                // also disables msSmartScreenProtection. Keep only the two
-                // browser-UI suppressions for privileged chrome.
+                // also disables msSmartScreenProtection. Keep only the
+                // feature suppressions privileged chrome needs.
                 .additional_browser_args(PRIVILEGED_WEBVIEW2_BROWSER_ARGS);
             #[cfg(not(all(unix, not(target_os = "macos"))))]
             let main_builder = main_builder.on_download(|_, _| false);
@@ -9209,7 +9212,7 @@ mod tests {
     fn privileged_webview2_args_keep_smartscreen_and_process_sandboxes_enabled() {
         assert_eq!(
             super::PRIVILEGED_WEBVIEW2_BROWSER_ARGS,
-            "--disable-features=msWebOOUI,msPdfOOUI"
+            "--disable-features=msWebOOUI,msPdfOOUI,SpareRendererForSitePerProcess"
         );
         let args = super::PRIVILEGED_WEBVIEW2_BROWSER_ARGS.to_ascii_lowercase();
         assert!(!args.contains("smartscreen"));

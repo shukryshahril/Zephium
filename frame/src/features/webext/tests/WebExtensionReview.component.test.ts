@@ -44,7 +44,7 @@ test("Escape cancels only the displayed review", async () => {
   expect(actions.cancel).toHaveBeenCalledExactlyOnceWith("displayed-review");
 });
 
-test("limitations are listed apart from the access it asks for", async () => {
+test("limitations wait behind one line, apart from the access it asks for", async () => {
   render(WebExtensionReview, {
     review: {
       ...review,
@@ -52,7 +52,10 @@ test("limitations are listed apart from the access it asks for", async () => {
       limitations: ["Can't show its side panel"],
     },
   });
-  await expect.element(page.getByText("Some features may not work in Zephium")).toBeVisible();
+  const limits = page.getByRole("button", { name: "Some features may not work in Zephium" });
+  await expect.element(limits).toHaveAttribute("aria-expanded", "false");
+  await expect.element(page.getByText("Can't show its side panel")).not.toBeInTheDocument();
+  await limits.click();
   await expect.element(page.getByText("Can't show its side panel")).toBeVisible();
 });
 

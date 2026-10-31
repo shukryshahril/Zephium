@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PuzzleIcon } from "@hugeicons/core-free-icons";
+  import { ArrowDown01Icon, PuzzleIcon } from "@hugeicons/core-free-icons";
   import { onMount } from "svelte";
   import type { WebExtensionReview } from "$shared/ipc/bindings";
   import { webext } from "$domain/webext";
@@ -13,6 +13,7 @@
   let busy = $derived(webext.isConfirming());
   let failure = $derived(webext.error());
   let detailed = $state(false);
+  let limited = $state(false);
   // The broadest access leads; the rest waits behind "more", which is where
   // a list of every permission belongs in a sheet this narrow.
   let lead = $derived(review.warnings[0] ?? null);
@@ -61,13 +62,23 @@
         </button>
       {/if}
     {/if}
+    <!-- What won't work is worth knowing, not worth reading first. -->
     {#if review.limitations.length > 0}
-      <div class="limits">
-        <p>{m.webext_review_limits()}</p>
-        <ul>
+      <button
+        type="button"
+        class="limits"
+        aria-expanded={limited}
+        aria-controls="web-extension-review-limits"
+        onclick={() => (limited = !limited)}
+      >
+        {m.webext_review_limits()}
+        <span class="chevron" aria-hidden="true"><Icon icon={ArrowDown01Icon} size={12} /></span>
+      </button>
+      {#if limited}
+        <ul id="web-extension-review-limits">
           {#each review.limitations as limitation (limitation)}<li>{limitation}</li>{/each}
         </ul>
-      </div>
+      {/if}
     {/if}
     {#if review.from_file}<p class="warning">{m.webext_from_file()}</p>{/if}
   </div>
@@ -152,11 +163,31 @@
   }
 
   .limits {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     margin-block-start: 10px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--color-muted);
+    text-align: start;
+    cursor: default;
   }
 
-  .limits p {
+  .limits:hover {
     color: var(--color-label-secondary);
+  }
+
+  .chevron {
+    display: inline-grid;
+    flex: none;
+    transition: rotate var(--motion-fast) var(--ease-out);
+  }
+
+  .limits[aria-expanded="true"] .chevron {
+    rotate: 180deg;
   }
 
   .more {

@@ -38,7 +38,8 @@ export const byInstall = (install: string) =>
   installed.find((extension) => extension.install_id === install) ?? null;
 /** Buttons the address field has room for beside the tray. */
 export const MAX_PINNED = 3;
-export const pinnedCount = () => installed.filter((extension) => extension.pinned).length;
+export const pinnedCount = () =>
+  installed.filter((extension) => extension.pinned && extension.enabled).length;
 export const isRemovalAsked = (id: string) => removalAsked === id;
 export const settleRemovalAsk = () => (removalAsked = null);
 

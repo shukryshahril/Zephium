@@ -63,13 +63,30 @@
 {/if}
 
 <style>
-  /* Beside the plus that opens a tab, in the row's own shape. */
+  /* Beside the plus that opens a tab, in the row's own shape, and shown as
+     the address tray's glyph is: with the pointer in the column after a
+     beat, at once over the row or with one of them in hand. */
   .pins {
     display: flex;
     flex: none;
     align-items: center;
     gap: 2px;
-    animation: interface-fade var(--motion-fast) var(--ease-out) both;
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--ease-out);
+  }
+
+  .pins:focus-within {
+    opacity: 1;
+  }
+
+  :global(.browser-sidebar[data-pointer-in="true"]) .pins {
+    opacity: 1;
+    transition-delay: 160ms;
+  }
+
+  :global(.browser-sidebar[data-pointer-in="true"] .space-bar:hover) .pins,
+  :global(.browser-sidebar[data-pointer-in="true"] .new-tab-slot:hover) .pins {
+    transition-delay: 0ms;
   }
 
   .pin {

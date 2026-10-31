@@ -366,11 +366,6 @@ export const commands = {
 	 */
 	webExtensionReviewUpdate: (id: string) => typedError<WebExtensionReview, string>(__TAURI_INVOKE("web_extension_review_update", { id })),
 	/**
-	 *  A recommended extension's icon as a data URL, or `None` while the store
-	 *  can't be reached.
-	 */
-	webExtensionCatalogIcon: (token: string) => typedError<string | null, string>(__TAURI_INVOKE("web_extension_catalog_icon", { token })),
-	/**
 	 *  Reads only platform capability state. It never enumerates credentials,
 	 *  relying parties, or extension-owned vault data and never opens native UI.
 	 */

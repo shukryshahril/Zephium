@@ -184,6 +184,8 @@ impl WebExtensions {
     fn prune(&self) {
         let root = self.root.clone();
         std::thread::spawn(move || {
+            // Catalog icons ship with the frame now; older builds cached them here.
+            let _ = std::fs::remove_dir_all(root.join("catalog-icons"));
             let Ok(_publication) = PUBLICATION.lock() else {
                 return;
             };

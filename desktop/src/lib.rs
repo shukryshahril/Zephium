@@ -1770,7 +1770,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             webext::web_extension_choose_file,
             webext::web_extension_prepare_file,
             webext::web_extension_review_update,
-            webext::web_extension_catalog_icon,
             browser_credentials::browser_credential_capability,
             browser_credentials::browser_passkey_authorization_request,
             page_permission_respond,

@@ -304,21 +304,6 @@ fn take_pending_for_publication<'a>(
     Ok((slot, pending))
 }
 
-/// A recommended extension's icon as a data URL, or `None` while the store
-/// can't be reached.
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn web_extension_catalog_icon(
-    caller: WebviewWindow,
-    extensions: State<'_, WebExtensions>,
-    token: String,
-) -> Result<Option<String>, String> {
-    if !authorize(&caller, CallerPolicy::Main, "web_extension_catalog_icon") {
-        return Err(UNAVAILABLE.into());
-    }
-    Ok(store_icon::icon(&extensions.root, &token).await)
-}
-
 /// Downloads and verifies the extension on the active store page, and
 /// returns what the user is asked to approve.
 #[tauri::command]
@@ -753,7 +738,6 @@ pub(crate) fn dropped_package(paths: &[PathBuf]) -> Option<String> {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod imp;
-mod store_icon;
 
 #[cfg(all(test, unix))]
 mod tests {

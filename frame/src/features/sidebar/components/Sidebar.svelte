@@ -445,9 +445,15 @@
     if (command.id === "sidebar.toggleCompact") queueMicrotask(toggleShape);
   });
 
+  /** Long enough for the column to go and come back as the card. */
+  const HIDING_SHOWN_MS = 1600;
+
   function toggleShape() {
-    if (tools.activeTool() !== null) tools.close();
-    else toggleMode();
+    if (tools.activeTool() !== null) return tools.close();
+    toggleMode();
+    // Put away from its own button, the column comes straight back as the
+    // card it now is, and leaves with the pointer as any card does.
+    if (isHidden()) attention.pulse(HIDING_SHOWN_MS);
   }
 </script>
 

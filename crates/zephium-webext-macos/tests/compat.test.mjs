@@ -165,7 +165,8 @@ function context(kind, declared = []) {
       updateContentScripts: () => Promise.resolve(),
     },
     webNavigation: { onCommitted: event() },
-    tabs: { onUpdated: event(), onRemoved: event(), sendMessage() {}, query: () => Promise.resolve([{ id: 1 }]) },
+    tabs: { onUpdated: event(), onRemoved: event(), sendMessage() {}, query: () => Promise.resolve([{ id: 1 }]), getCurrent: () => Promise.resolve({ id: 1 }) },
+    extension: { popups: [], getViews({ type }) { return type === "popup" ? this.popups : []; } },
   };
   const g = {
     chrome,
@@ -375,6 +376,14 @@ test("API methods work apart from their namespace", async () => {
   const { getURL } = chrome.runtime;
   assert.equal((await query({ active: true })).length, 1);
   assert.match(getURL("x"), /\/x$/);
+});
+
+test("a popup is in no tab, as in Chrome", async () => {
+  const g = context("page");
+  const { chrome } = g;
+  assert.equal((await chrome.tabs.getCurrent()).id, 1);
+  chrome.extension.popups.push(vm.runInContext("globalThis", g));
+  assert.equal(await chrome.tabs.getCurrent(), undefined);
 });
 
 test("network rule updates keep what WebKit can apply", async () => {

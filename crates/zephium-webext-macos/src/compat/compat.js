@@ -1239,6 +1239,18 @@
     });
   }
 
+  // Chrome's popup is in no tab; WebKit answers with the tab under it, and
+  // popups that size themselves (Proton Pass) then fill a tab's width.
+  if (tabsApi && typeof tabsApi.getCurrent === "function") {
+    const getCurrent = tabsApi.getCurrent;
+    const extension = namespace("extension");
+    pin(tabsApi, "getCurrent", function (callback) {
+      const views = extension && typeof extension.getViews === "function" ? extension.getViews({ type: "popup" }) : [];
+      if (views.includes(globalThis)) return withCallback(Promise.resolve(undefined), callback);
+      return getCurrent.apply(this, arguments);
+    });
+  }
+
   // WebKit declares tabs.detectLanguage but reports it unimplemented; the
   // page's own declared language answers most of what translators ask.
   if (tabsApi && chromeApi.scripting && typeof chromeApi.scripting.executeScript === "function") {

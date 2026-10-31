@@ -102,22 +102,26 @@ impl Host for LabHost {
 
     fn present_popup(&self, extension: &str, action: &objc2_web_kit::WKWebExtensionAction) -> bool {
         eprintln!("[lab] WebKit popup for {extension}");
-        let Some(view) = (unsafe { action.popupWebView() }) else {
+        let (Some(view), Some(popover)) = (unsafe { action.popupWebView() }, unsafe {
+            action.popupPopover()
+        }) else {
             return false;
         };
         let Some(lab) = self.lab.borrow().upgrade() else {
             return false;
         };
-        view.setFrame(NSRect::new(
-            NSPoint::new(900.0, 0.0),
-            NSSize::new(500.0, 800.0),
-        ));
-        if let Some(old) = lab.page.borrow_mut().replace(view.clone()) {
-            old.removeFromSuperview();
-        }
-        if let Some(content) = lab.window.contentView() {
-            content.addSubview(&view);
-        }
+        let Some(content) = lab.window.contentView() else {
+            return false;
+        };
+        // Sized by WebKit as the browser's popover is, so the popup's own
+        // layout is what gets measured.
+        popover.showRelativeToRect_ofView_preferredEdge(
+            NSRect::new(NSPoint::new(1300.0, 700.0), NSSize::new(20.0, 20.0)),
+            &content,
+            objc2_foundation::NSRectEdge::MinY,
+        );
+        *lab.popover.borrow_mut() = Some(popover);
+        lab.page.borrow_mut().replace(view);
         true
     }
 
@@ -240,6 +244,7 @@ struct Lab {
     active: Cell<u64>,
     next_tab: Cell<u64>,
     page: RefCell<Option<Retained<WKWebView>>>,
+    popover: RefCell<Option<Retained<objc2_app_kit::NSPopover>>>,
     extension: RefCell<Option<String>>,
     scratch: PathBuf,
 }
@@ -288,6 +293,7 @@ impl Lab {
             active: Cell::new(0),
             next_tab: Cell::new(1),
             page: RefCell::new(None),
+            popover: RefCell::new(None),
             extension: RefCell::new(None),
             scratch,
         });
@@ -505,9 +511,9 @@ impl Lab {
         } else if let Some(what) = step.get("close").and_then(Value::as_str) {
             match what {
                 "popup" => {
-                    let view = this.page.borrow_mut().take();
-                    if let Some(view) = view {
-                        view.removeFromSuperview();
+                    this.page.borrow_mut().take();
+                    if let Some(popover) = this.popover.borrow_mut().take() {
+                        popover.close();
                     }
                 }
                 _ => {

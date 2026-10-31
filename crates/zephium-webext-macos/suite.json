@@ -354,7 +354,8 @@
   {
     "name": "OneTab",
     "id": "chphlpgkkbolifaimnlloiipkdnihall",
-    "popup": false
+    "popup": false,
+    "allow": ["Identifier is already used"]
   },
   {
     "name": "Phantom",

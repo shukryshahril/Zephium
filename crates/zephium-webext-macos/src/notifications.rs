@@ -182,7 +182,10 @@ pub(crate) fn update(
     name: &str,
     message: &Value,
 ) -> Result<Value, String> {
-    let id = message.get("id").and_then(Value::as_str).unwrap_or_default();
+    let id = message
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let merged = CENTER.with(|center| {
         let center = center.borrow();
         let shown = center.shown.values().find(|shown| {
@@ -192,14 +195,23 @@ pub(crate) fn update(
         })?;
         let mut merged = shown.options.as_object().cloned().unwrap_or_default();
         if let Some(changes) = message.get("options").and_then(Value::as_object) {
-            merged.extend(changes.iter().map(|(key, value)| (key.clone(), value.clone())));
+            merged.extend(
+                changes
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
         }
         Some(Value::Object(merged))
     });
     let Some(options) = merged else {
         return Ok(Value::Bool(false));
     };
-    create(shared, extension, name, &json!({ "id": id, "options": options }))?;
+    create(
+        shared,
+        extension,
+        name,
+        &json!({ "id": id, "options": options }),
+    )?;
     Ok(Value::Bool(true))
 }
 

@@ -192,7 +192,11 @@ fn receive(shared: &Rc<Shared>, key: usize, message: Value) {
             let Some(listening) = extensions.get_mut(&port.extension) else {
                 return;
             };
-            if let Some(index) = listening.queue.iter().position(|q| q.seq == seq && q.sent.is_some()) {
+            if let Some(index) = listening
+                .queue
+                .iter()
+                .position(|q| q.seq == seq && q.sent.is_some())
+            {
                 let queued = listening.queue.remove(index).expect("index is in range");
                 if let Some(reply) = queued.reply {
                     hub.replies.borrow_mut().insert(seq, (key, reply));
@@ -290,7 +294,11 @@ fn pump(shared: &Rc<Shared>, extension: &str) {
     };
     let mut posted = false;
     if let Some(listening) = hub.extensions.borrow_mut().get_mut(extension) {
-        for queued in listening.queue.iter_mut().filter(|queued| queued.sent.is_none()) {
+        for queued in listening
+            .queue
+            .iter_mut()
+            .filter(|queued| queued.sent.is_none())
+        {
             queued.sent = Some(Instant::now());
             posted = true;
             let mut message = json!({

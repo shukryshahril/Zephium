@@ -35,6 +35,10 @@ const IDLE: Duration = Duration::from_secs(15);
 /// What the background gets to finish starting before anything uses it.
 const SETTLE: Duration = Duration::from_millis(2500);
 const POPUP_WAIT: u64 = 10_000;
+/// Loads of the ordinary page timed per run; the least busy counts.
+const LOADS: usize = 3;
+/// Page loads and closes in a `--soak` run, after which memory should be back.
+const SOAK_LOADS: usize = 30;
 /// What an API the runtime lacks or gets wrong looks like when it reaches an
 /// extension; its own network or account errors don't match.
 const GAP_SIGNATURES: &[&str] = &[
@@ -137,6 +141,7 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
         .into_iter()
         .filter(|entry| only.is_empty() || only.contains(&entry.name.to_lowercase()))
         .collect();
+    let soak = arguments.iter().any(|argument| argument == "--soak");
 
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
@@ -185,8 +190,8 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
                     return;
                 };
                 let outcome = match job {
-                    Job::Baseline => baseline(&lab, &cache, &origin),
-                    Job::Extension(entry) => check(&lab, &cache, &origin, &entry),
+                    Job::Baseline => baseline(&lab, &cache, &origin, soak),
+                    Job::Extension(entry) => check(&lab, &cache, &origin, &entry, soak),
                 };
                 if let Ok(mut outcomes) = outcomes.lock() {
                     outcomes.push(outcome);
@@ -215,8 +220,8 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
         .collect();
 
     println!(
-        "{:<8} {:<26} {:>6} {:>6} {:>9} {:>5}",
-        "status", "extension", "mem MB", "rss MB", "idle cpu", "time"
+        "{:<8} {:<26} {:>6} {:>6} {:>9} {:>7} {:>7} {:>5}",
+        "status", "extension", "mem MB", "rss MB", "idle cpu", "busy ms", "soak MB", "time"
     );
     if let Some(baseline) = baseline.first() {
         println!(
@@ -268,6 +273,16 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
     };
     println!("most memory: {}", heaviest(|r| r.footprint_mb, " MB", 0));
     println!("most idle cpu: {}", heaviest(|r| r.idle_cpu_s, " s", 2));
+    println!(
+        "most page time taken: {}",
+        heaviest(|r| r.busy_ms, " ms", 0)
+    );
+    if soak {
+        println!(
+            "most memory kept after closing pages: {}",
+            heaviest(|r| r.soak_mb, " MB", 0)
+        );
+    }
     let regressions = results.regressions(&records);
     for regression in &regressions {
         println!("regressed since the last run: {regression}");
@@ -292,10 +307,12 @@ fn figures(resources: &Resources, duration: Duration) -> String {
         value.map_or("-".to_string(), |value| format!("{value:.places$}"))
     };
     format!(
-        "{:>6} {:>6} {:>9} {:>4}s",
+        "{:>6} {:>6} {:>9} {:>7} {:>7} {:>4}s",
         cell(resources.footprint_mb, 0),
         cell(resources.rss_mb, 0),
         cell(resources.idle_cpu_s, 2),
+        cell(resources.busy_ms, 0),
+        cell(resources.soak_mb, 0),
         duration.as_secs()
     )
 }
@@ -347,12 +364,16 @@ struct Run {
     duration: Duration,
 }
 
-fn baseline(lab: &Path, cache: &Path, origin: &str) -> Outcome {
+fn baseline(lab: &Path, cache: &Path, origin: &str, soak: bool) -> Outcome {
     let mut steps = vec![serde_json::json!({ "tab": format!("{origin}/blank.html") })];
+    steps.extend(load_steps(origin));
+    if soak {
+        steps.extend(soak_steps(origin));
+    }
     steps.extend(idle_steps());
     let (problems, resources, duration) =
         match launch(lab, cache, "baseline", &steps, START_TIMEOUT) {
-            Ok(run) => (Vec::new(), run.resources, run.duration),
+            Ok(run) => (Vec::new(), timed(run.resources, &run.output), run.duration),
             Err(error) => (vec![error], Resources::default(), Duration::ZERO),
         };
     Outcome {
@@ -365,7 +386,7 @@ fn baseline(lab: &Path, cache: &Path, origin: &str) -> Outcome {
     }
 }
 
-fn check(lab: &Path, cache: &Path, origin: &str, entry: &Expectation) -> Outcome {
+fn check(lab: &Path, cache: &Path, origin: &str, entry: &Expectation, soak: bool) -> Outcome {
     let crx = cache.join(format!("{}.crx", entry.id));
     let budget = START_TIMEOUT
         + IDLE
@@ -376,10 +397,15 @@ fn check(lab: &Path, cache: &Path, origin: &str, entry: &Expectation) -> Outcome
                 .map(|check| check.wait + 12_000)
                 .sum::<u64>()
                 + if entry.popup { POPUP_WAIT + 5000 } else { 0 },
-        );
-    let steps = steps(entry, &crx, origin);
+        )
+        + Duration::from_secs(if soak { 120 } else { 20 });
+    let steps = steps(entry, &crx, origin, soak);
     let (problems, resources, duration) = match launch(lab, cache, &entry.id, &steps, budget) {
-        Ok(run) => (evaluate(entry, &run.output), run.resources, run.duration),
+        Ok(run) => (
+            evaluate(entry, &run.output),
+            timed(run.resources, &run.output),
+            run.duration,
+        ),
         Err(error) => (vec![error], Resources::default(), Duration::ZERO),
     };
     Outcome {
@@ -392,7 +418,7 @@ fn check(lab: &Path, cache: &Path, origin: &str, entry: &Expectation) -> Outcome
     }
 }
 
-fn steps(entry: &Expectation, crx: &Path, origin: &str) -> Vec<serde_json::Value> {
+fn steps(entry: &Expectation, crx: &Path, origin: &str, soak: bool) -> Vec<serde_json::Value> {
     let mut steps = vec![
         serde_json::json!({ "load": crx, "compat": true }),
         serde_json::json!({ "tab": format!("{origin}/blank.html") }),
@@ -407,8 +433,14 @@ fn steps(entry: &Expectation, crx: &Path, origin: &str) -> Vec<serde_json::Value
             "timeout": POPUP_WAIT + 5000,
             "as": "popup"
         }));
+        steps.push(serde_json::json!({
+            "eval": "const page = document.documentElement; return JSON.stringify({ width: innerWidth, height: innerHeight, content: page.scrollWidth });",
+            "in": "page",
+            "as": "popup-size"
+        }));
         steps.push(serde_json::json!({ "close": "popup" }));
     }
+    steps.extend(load_steps(origin));
     for (index, check) in entry.check.iter().enumerate() {
         let url = if check.url.starts_with('/') {
             format!("{origin}{}", check.url)
@@ -426,8 +458,55 @@ fn steps(entry: &Expectation, crx: &Path, origin: &str) -> Vec<serde_json::Value
         steps.push(serde_json::json!({ "sleep": check.settle }));
         steps.push(serde_json::json!({ "close": "tabs" }));
     }
+    if soak {
+        steps.extend(soak_steps(origin));
+    }
     steps.extend(idle_steps());
     steps
+}
+
+/// An ordinary page with a sign-in form, loaded a few times so the least
+/// busy load stands for what the extension adds to every page.
+fn load_steps(origin: &str) -> Vec<serde_json::Value> {
+    let mut steps = vec![serde_json::json!({ "close": "tabs" })];
+    for index in 0..LOADS {
+        steps.push(serde_json::json!({ "tab": format!("{origin}/page.html?{index}") }));
+        steps.push(serde_json::json!({
+            "eval": "await new Promise((resolve) => setTimeout(resolve, 1600)); return Math.round(window.busy);",
+            "in": "tab",
+            "as": format!("load{index}")
+        }));
+        steps.push(serde_json::json!({ "close": "tabs" }));
+    }
+    steps
+}
+
+/// Pages opened and closed many times; memory the extension keeps after the
+/// last one closes is what it would leak over a day.
+fn soak_steps(origin: &str) -> Vec<serde_json::Value> {
+    let mut steps = Vec::new();
+    // A few rounds first, so processes WebKit keeps warm for closed pages
+    // are there at both ends.
+    for index in 0..5 {
+        steps.push(serde_json::json!({ "tab": format!("{origin}/page.html?warm{index}") }));
+        steps.push(serde_json::json!({ "close": "tabs" }));
+    }
+    steps.push(serde_json::json!({ "sleep": 5000 }));
+    steps.push(serde_json::json!({ "mark": "soak-start" }));
+    for index in 0..SOAK_LOADS {
+        steps.push(serde_json::json!({ "tab": format!("{origin}/page.html?soak{index}") }));
+        steps.push(serde_json::json!({ "close": "tabs" }));
+    }
+    steps.push(serde_json::json!({ "sleep": 5000 }));
+    steps.push(serde_json::json!({ "mark": "soak-end" }));
+    steps
+}
+
+fn timed(mut resources: Resources, output: &str) -> Resources {
+    resources.busy_ms = (0..LOADS)
+        .filter_map(|index| result(output, &format!("load{index}"))?.parse::<f64>().ok())
+        .min_by(f64::total_cmp);
+    resources
 }
 
 /// The extension rests, with one idle page open, while its helpers are sampled.
@@ -506,6 +585,8 @@ fn launch(
     let mut reader = std::fs::File::open(&log).map_err(|e| e.to_string())?;
     let mut output = String::new();
     let mut idle_start = None;
+    let mut soak_start = None;
+    let mut soak_mb = None;
     let mut resources = Resources::default();
     let deadline = started + budget;
     let mut last_step = started;
@@ -517,6 +598,18 @@ fn launch(
             last_step = Instant::now();
         }
         output.push_str(&chunk);
+        if soak_start.is_none() && output.contains("MARK soak-start\n") {
+            soak_start = measure::sample(child.id(), &footprints);
+        } else if soak_mb.is_none() && output.contains("MARK soak-end\n") {
+            if let (Some(start), Some(end)) =
+                (&soak_start, measure::sample(child.id(), &footprints))
+            {
+                soak_mb = Some(
+                    ((end.footprint_bytes as f64 - start.footprint_bytes as f64) / 1_048_576.0)
+                        .round(),
+                );
+            }
+        }
         if idle_start.is_none() && output.contains("MARK idle-start\n") {
             idle_start = Some(measure::sample(child.id(), &footprints).unwrap_or_default());
         } else if resources.footprint_mb.is_none() && output.contains("MARK idle-end\n") {
@@ -528,6 +621,7 @@ fn launch(
                     footprint_mb: Some((end.footprint_bytes as f64 / 1_048_576.0).round()),
                     idle_cpu_s: Some((end.cpu_since(start) * 100.0).round() / 100.0),
                     processes: end.processes(),
+                    ..Resources::default()
                 };
             }
         }
@@ -548,9 +642,11 @@ fn launch(
                 footprint_mb: Some((last.footprint_bytes as f64 / 1_048_576.0).round()),
                 idle_cpu_s: None,
                 processes: last.processes(),
+                ..Resources::default()
             };
         }
     }
+    resources.soak_mb = soak_mb;
     let _ = child.kill();
     let _ = child.wait();
     let _ = reader.seek(SeekFrom::Start(output.len() as u64));
@@ -608,6 +704,21 @@ fn evaluate(entry: &Expectation, output: &str) -> Vec<String> {
         let lowered = text.to_lowercase();
         if text.is_empty() {
             problems.push("popup rendered nothing".to_string());
+        }
+        let size = result(output, "popup-size")
+            .and_then(|value| serde_json::from_str::<String>(value).ok())
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
+        if let Some(size) = size {
+            let number = |key: &str| size.get(key).and_then(serde_json::Value::as_f64);
+            if let (Some(width), Some(height), Some(content)) =
+                (number("width"), number("height"), number("content"))
+            {
+                if content > width + 1.0 {
+                    problems.push(format!(
+                        "popup squeezed: {content:.0} px of content in {width:.0}x{height:.0}"
+                    ));
+                }
+            }
         }
         for word in &entry.popup_lacks {
             if lowered.contains(&word.to_lowercase()) {

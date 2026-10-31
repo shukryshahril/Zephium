@@ -72,7 +72,7 @@
     align-items: center;
     gap: 2px;
     opacity: 0;
-    transition: opacity var(--motion-fast) var(--ease-out);
+    transition: opacity var(--motion-slow) var(--ease-smooth);
   }
 
   .pins:focus-within {
@@ -81,11 +81,13 @@
 
   :global(.browser-sidebar[data-pointer-in="true"]) .pins {
     opacity: 1;
-    transition-delay: 160ms;
+    transition-delay: 120ms;
   }
 
+  :global(.browser-sidebar[data-peek]) .pins,
   :global(.browser-sidebar[data-pointer-in="true"] .space-bar:hover) .pins,
   :global(.browser-sidebar[data-pointer-in="true"] .new-tab-slot:hover) .pins {
+    opacity: 1;
     transition-delay: 0ms;
   }
 

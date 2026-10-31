@@ -61,12 +61,28 @@
 {/if}
 
 <style>
+  /* One group with the tray beside them, and shown when it is: with the
+     pointer in the column after a beat, at once over the field or with the
+     tray open. Typing an address needs their room. */
   .pins {
     display: flex;
     flex: none;
     align-items: center;
-    gap: 1px;
-    animation: interface-fade var(--motion-fast) var(--ease-out) both;
+    margin-inline-end: -8px;
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--ease-out);
+  }
+
+  :global(.browser-sidebar[data-pointer-in="true"]) .pins {
+    opacity: 1;
+    transition-delay: 160ms;
+  }
+
+  :global(.browser-sidebar[data-pointer-in="true"] .address-field:hover) .pins,
+  :global(.address-field:has(.utilities-trigger[data-state="open"])) .pins,
+  .pins:focus-within {
+    opacity: 1;
+    transition-delay: 0ms;
   }
 
   :global(.address-field:has(input[data-zephium-address]:focus)) .pins {

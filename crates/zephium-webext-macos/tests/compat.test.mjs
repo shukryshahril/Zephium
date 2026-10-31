@@ -378,6 +378,14 @@ test("API methods work apart from their namespace", async () => {
   assert.match(getURL("x"), /\/x$/);
 });
 
+test("a page asks for the browser's permissions only during a click", async () => {
+  const g = context("page");
+  g.navigator.userActivation = { isActive: false };
+  await assert.rejects(g.chrome.permissions.request({ permissions: ["idle"] }), /user gesture/);
+  g.navigator.userActivation = { isActive: true };
+  assert.equal(await g.chrome.permissions.request({ permissions: ["idle"] }), true);
+});
+
 test("a popup is in no tab, as in Chrome", async () => {
   const g = context("page");
   const { chrome } = g;

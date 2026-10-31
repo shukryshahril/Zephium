@@ -124,6 +124,16 @@ pub(crate) fn state(shared: &Shared, context: &WKWebExtensionContext) -> Value {
     json!({ "granted": granted, "declared": required.into_iter().chain(optional).collect::<Vec<_>>() })
 }
 
+thread_local! {
+    /// Extensions with a permission prompt waiting on the person.
+    static ASKING: std::cell::RefCell<std::collections::HashSet<String>> = Default::default();
+}
+
+/// Lets an unloaded extension ask again once it is back.
+pub(crate) fn forget(extension: &str) {
+    ASKING.with(|asking| asking.borrow_mut().remove(extension));
+}
+
 /// `permissions.request` for browser permissions: only ones the manifest
 /// declares, asked through the same prompt as WebKit's own.
 pub(crate) fn request(
@@ -159,6 +169,13 @@ pub(crate) fn request(
     if missing.iter().any(|name| name == NATIVE) && !grantable {
         return done(Ok(Value::Bool(false)));
     }
+    // One question at a time: an extension can't stack prompts behind the
+    // one the person is answering.
+    if !ASKING.with(|asking| asking.borrow_mut().insert(id.clone())) {
+        return done(Err(
+            "A permission request is already waiting for an answer.".into(),
+        ));
+    }
     let weak = Rc::downgrade(shared);
     let extension = id.clone();
     crate::access::request(
@@ -167,6 +184,7 @@ pub(crate) fn request(
         missing.clone(),
         Vec::new(),
         Box::new(move |allowed| {
+            ASKING.with(|asking| asking.borrow_mut().remove(&extension));
             if allowed {
                 if let Some(shared) = weak.upgrade() {
                     grant(&shared, &extension, &missing);

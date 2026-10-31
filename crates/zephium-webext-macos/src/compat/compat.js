@@ -415,7 +415,16 @@
     const browserPart = {
       contains: (names, ok) =>
         ok && names.length ? browserState().then((state) => names.every((name) => state.granted.includes(name))) : ok,
-      request: (names, ok) => (ok && names.length ? native("permissions.request", { permissions: names }) : ok),
+      // As in Chrome, a page asks during a click; a worker asks from the
+      // events a click brings it.
+      request: (names, ok) => {
+        if (!ok || !names.length) return ok;
+        const activation = !isWorker && g.navigator && g.navigator.userActivation;
+        if (activation && !activation.isActive) {
+          return Promise.reject(new Error("This function must be called during a user gesture"));
+        }
+        return native("permissions.request", { permissions: names });
+      },
       remove: (names, ok) => (names.length ? native("permissions.remove", { permissions: names }).then((done) => ok && done) : ok),
     };
     const guard = (method, withUnknown) => {

@@ -15,7 +15,7 @@ mod measure;
 mod results;
 
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -225,6 +225,9 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
             "(page only, no extension)",
             figures(&baseline.resources, baseline.duration)
         );
+        for problem in &baseline.problems {
+            println!("         {problem}");
+        }
     }
     for outcome in &outcomes {
         let record = &records[&outcome.name];
@@ -276,7 +279,10 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
     results.generated = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    if let Some(baseline) = baseline.first() {
+    // A failed baseline run keeps the last good figures to compare against.
+    if let Some(baseline) = baseline.first().filter(|baseline| {
+        baseline.problems.is_empty() && baseline.resources.footprint_mb.is_some()
+    }) {
         results.baseline = Some(baseline.resources.clone());
     }
     results.extensions.extend(records);
@@ -504,19 +510,26 @@ fn launch(
         .map_err(|e| e.to_string())?;
     let footprints = cache.join(format!("{stem}.footprint.json"));
     let mut reader = std::fs::File::open(&log).map_err(|e| e.to_string())?;
+    // Decoded whole each time, because a poll can end inside a character.
+    let mut bytes = Vec::new();
     let mut output = String::new();
     let mut idle_start = None;
     let mut resources = Resources::default();
     let deadline = started + budget;
     let mut last_step = started;
     loop {
-        let mut chunk = Vec::new();
-        let _ = reader.read_to_end(&mut chunk);
-        let chunk = String::from_utf8_lossy(&chunk);
-        if chunk.contains("STEP ") {
-            last_step = Instant::now();
+        let before = bytes.len();
+        let _ = reader.read_to_end(&mut bytes);
+        if bytes.len() > before {
+            // A marker can straddle two polls; the overlap is shorter than it.
+            if bytes[before.saturating_sub(4)..]
+                .windows(5)
+                .any(|window| window == b"STEP ")
+            {
+                last_step = Instant::now();
+            }
+            output = String::from_utf8_lossy(&bytes).into_owned();
         }
-        output.push_str(&chunk);
         if idle_start.is_none() && output.contains("MARK idle-start\n") {
             idle_start = Some(measure::sample(child.id(), &footprints).unwrap_or_default());
         } else if resources.footprint_mb.is_none() && output.contains("MARK idle-end\n") {
@@ -525,7 +538,9 @@ fn launch(
             {
                 resources = Resources {
                     rss_mb: Some((end.rss_kb as f64 / 1024.0).round()),
-                    footprint_mb: Some((end.footprint_bytes as f64 / 1_048_576.0).round()),
+                    footprint_mb: end
+                        .footprint_bytes
+                        .map(|bytes| (bytes as f64 / 1_048_576.0).round()),
                     idle_cpu_s: Some((end.cpu_since(start) * 100.0).round() / 100.0),
                     processes: end.processes(),
                 };
@@ -545,7 +560,9 @@ fn launch(
         if let Some(last) = measure::sample(child.id(), &footprints) {
             resources = Resources {
                 rss_mb: Some((last.rss_kb as f64 / 1024.0).round()),
-                footprint_mb: Some((last.footprint_bytes as f64 / 1_048_576.0).round()),
+                footprint_mb: last
+                    .footprint_bytes
+                    .map(|bytes| (bytes as f64 / 1_048_576.0).round()),
                 idle_cpu_s: None,
                 processes: last.processes(),
             };
@@ -553,10 +570,8 @@ fn launch(
     }
     let _ = child.kill();
     let _ = child.wait();
-    let _ = reader.seek(SeekFrom::Start(output.len() as u64));
-    let mut rest = Vec::new();
-    let _ = reader.read_to_end(&mut rest);
-    output.push_str(&String::from_utf8_lossy(&rest));
+    let _ = reader.read_to_end(&mut bytes);
+    let output = String::from_utf8_lossy(&bytes).into_owned();
     remove_profile(&output);
     Ok(Run {
         output,

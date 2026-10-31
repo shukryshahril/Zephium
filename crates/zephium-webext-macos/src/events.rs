@@ -11,6 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ptr::NonNull;
 use std::rc::{Rc, Weak as RcWeak};
+use std::time::{Duration, Instant};
 
 use block2::RcBlock;
 use objc2::rc::Retained;
@@ -57,7 +58,8 @@ struct Queued {
     name: String,
     args: Value,
     reply: Option<Reply>,
-    sent: bool,
+    /// When it was posted to the worker, once it has been.
+    sent: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -168,7 +170,7 @@ fn receive(shared: &Rc<Shared>, key: usize, message: Value) {
                         .partition(|queued| events.contains(&queued.name));
                 listening.queue = kept;
                 for queued in &mut listening.queue {
-                    queued.sent = false;
+                    queued.sent = None;
                 }
                 unheard = dropped;
             }
@@ -192,7 +194,11 @@ fn receive(shared: &Rc<Shared>, key: usize, message: Value) {
             let Some(listening) = extensions.get_mut(&port.extension) else {
                 return;
             };
-            if let Some(index) = listening.queue.iter().position(|q| q.seq == seq && q.sent) {
+            if let Some(index) = listening
+                .queue
+                .iter()
+                .position(|q| q.seq == seq && q.sent.is_some())
+            {
                 let queued = listening.queue.remove(index).expect("index is in range");
                 if let Some(reply) = queued.reply {
                     hub.replies.borrow_mut().insert(seq, (key, reply));
@@ -264,7 +270,7 @@ pub(crate) fn emit(
                     name: name.to_owned(),
                     args,
                     reply,
-                    sent: false,
+                    sent: None,
                 });
                 Ok(dropped.and_then(|queued| queued.reply))
             }
@@ -290,8 +296,12 @@ fn pump(shared: &Rc<Shared>, extension: &str) {
     };
     let mut posted = false;
     if let Some(listening) = hub.extensions.borrow_mut().get_mut(extension) {
-        for queued in listening.queue.iter_mut().filter(|queued| !queued.sent) {
-            queued.sent = true;
+        for queued in listening
+            .queue
+            .iter_mut()
+            .filter(|queued| queued.sent.is_none())
+        {
+            queued.sent = Some(Instant::now());
             posted = true;
             let mut message = json!({
                 "op": "event", "name": queued.name, "args": queued.args, "seq": queued.seq,
@@ -418,14 +428,22 @@ fn schedule_ack_check(shared: &Rc<Shared>) {
 /// A worker that left events unacknowledged is gone: its port is dropped and
 /// the events go to the next worker.
 fn check_acks(shared: &Rc<Shared>) {
-    let stale: Vec<String> = shared
-        .events
-        .extensions
-        .borrow()
-        .iter()
-        .filter(|(_, listening)| listening.queue.iter().any(|queued| queued.sent))
-        .map(|(extension, _)| extension.clone())
-        .collect();
+    // One timer serves every send, so an event posted after it was armed is
+    // still inside its own window and gets one more round.
+    let window = Duration::from_secs_f64(ACK_SECONDS);
+    let overdue = |queued: &Queued| queued.sent.is_some_and(|at| at.elapsed() >= window);
+    let mut waiting = false;
+    let mut stale = Vec::new();
+    for (extension, listening) in shared.events.extensions.borrow().iter() {
+        if listening.queue.iter().any(overdue) {
+            stale.push(extension.clone());
+        } else if listening.queue.iter().any(|queued| queued.sent.is_some()) {
+            waiting = true;
+        }
+    }
+    if waiting {
+        schedule_ack_check(shared);
+    }
     for extension in stale {
         if crate::tracing() {
             eprintln!("webext-trace: events of {extension} unacknowledged; restarting its worker");
@@ -443,7 +461,7 @@ fn check_acks(shared: &Rc<Shared>) {
         }
         if let Some(listening) = shared.events.extensions.borrow_mut().get_mut(&extension) {
             for queued in &mut listening.queue {
-                queued.sent = false;
+                queued.sent = None;
             }
         }
         pump(shared, &extension);
@@ -507,7 +525,7 @@ pub(crate) fn worker_gone(shared: &Shared, extension: &str) {
     }
     if let Some(listening) = shared.events.extensions.borrow_mut().get_mut(extension) {
         for queued in &mut listening.queue {
-            queued.sent = false;
+            queued.sent = None;
         }
     }
 }

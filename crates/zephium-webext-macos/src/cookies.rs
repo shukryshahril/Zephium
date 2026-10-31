@@ -124,9 +124,13 @@ fn compare(shared: &Rc<Shared>) {
             .take(MAX_COOKIES)
             .map(|cookie| describe(&cookie))
             .collect();
-        let previous = shared.cookies.snapshot.replace(Some(current.clone()));
-        if let Some(previous) = previous {
-            deliver(&shared, &previous, &current);
+        let previous = shared.cookies.snapshot.borrow_mut().take();
+        if let Some(previous) = &previous {
+            deliver(&shared, previous, &current);
+        }
+        // Delivery can end the last listener, which stops the watch.
+        if shared.cookies.observer.borrow().is_some() {
+            *shared.cookies.snapshot.borrow_mut() = Some(current);
         }
     });
     unsafe { store(shared).getAllCookies(&done) };

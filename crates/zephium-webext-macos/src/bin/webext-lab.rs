@@ -161,6 +161,10 @@ impl Host for LabHost {
                     }
                     *id != tab
                 });
+                if lab.active.get() == tab {
+                    let first = lab.tabs.borrow().first().map_or(0, |(id, _)| *id);
+                    lab.active.set(first);
+                }
                 lab.publish();
                 done(Ok(None));
             }

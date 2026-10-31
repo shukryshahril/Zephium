@@ -547,6 +547,45 @@ define_class!(
             }
         }
 
+        /// The window an extension opened is a tab of the browser's window,
+        /// so closing "its" window closes only the tabs it opened there
+        /// (Bitwarden's unlock and passkey pop-outs). The browser's window
+        /// itself is never closed for an extension.
+        #[unsafe(method(closeForWebExtensionContext:completionHandler:))]
+        fn close(
+            &self,
+            context: &WKWebExtensionContext,
+            completion: &DynBlock<dyn Fn(*mut NSError)>,
+        ) {
+            let Some(shared) = self.ivars().shared.upgrade() else {
+                completion.call((std::ptr::null_mut(),));
+                return;
+            };
+            let extension = unsafe { context.uniqueIdentifier() }.to_string();
+            let closing: Vec<u64> = {
+                let mut popouts = shared.popouts.borrow_mut();
+                let owned = popouts.entry(extension).or_default();
+                let mine: Vec<u64> = owned
+                    .iter()
+                    .copied()
+                    .filter(|tab| self.tab(*tab).is_some())
+                    .collect();
+                owned.retain(|tab| !mine.contains(tab));
+                mine
+            };
+            if closing.is_empty() {
+                let error = error("The browser's window can't be closed by an extension.");
+                completion.call((Retained::as_ptr(&error).cast_mut(),));
+                return;
+            }
+            for tab in closing {
+                shared
+                    .host()
+                    .tab_request(TabRequest::Close { tab }, Box::new(|_| {}));
+            }
+            completion.call((std::ptr::null_mut(),));
+        }
+
         #[unsafe(method(focusForWebExtensionContext:completionHandler:))]
         fn focus(
             &self,

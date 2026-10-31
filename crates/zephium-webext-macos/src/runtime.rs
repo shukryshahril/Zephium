@@ -82,6 +82,9 @@ pub(crate) struct Shared {
     pub(crate) privacy: crate::privacy::Overrides,
     pub(crate) cookies: crate::cookies::Watch,
     pub(crate) downloads_seen: crate::downloads::Seen,
+    /// Tabs each extension opened as windows of their own, which it may close
+    /// again as windows.
+    pub(crate) popouts: RefCell<HashMap<String, Vec<u64>>>,
     pub(crate) data_interest: std::cell::Cell<zephium_core::extension_data::ExtensionDataInterest>,
     pub(crate) store: Retained<WKWebsiteDataStore>,
     pub(crate) mtm: MainThreadMarker,
@@ -153,6 +156,7 @@ impl Runtime {
             privacy: Default::default(),
             cookies: Default::default(),
             downloads_seen: Default::default(),
+            popouts: Default::default(),
             data_interest: Default::default(),
             store: store.retain(),
             mtm,
@@ -798,6 +802,7 @@ fn unload(shared: &Rc<Shared>, controller: &WKWebExtensionController, id: &str) 
     crate::idle::forget(shared, id);
     crate::privacy::forget(shared, id);
     crate::notifications::forget(shared, id);
+    shared.popouts.borrow_mut().remove(id);
     crate::cookies::refresh(shared);
     unsafe { controller.unloadExtensionContext_error(&loaded.context) }.is_ok()
 }

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { parkCaret } from "../parked-caret";
 
+vi.mock("$shared/platform", () => ({ IS_MAC: true }));
+
 let field: HTMLFormElement;
 let input: HTMLInputElement;
 let stop: () => void;
@@ -42,6 +44,14 @@ test("the next typed key brings focus back, and shortcuts don't", () => {
   expect(document.activeElement).toBe(input);
   expect(input.dataset.caretParked).toBeUndefined();
   expect(caret()).toBeNull();
+});
+
+test("dead keys and AltGr bring focus back, plain Control doesn't", () => {
+  vi.advanceTimersByTime(4100);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+  expect(document.activeElement).not.toBe(input);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Dead" }));
+  expect(document.activeElement).toBe(input);
 });
 
 test("a field with text keeps its caret, and clicking elsewhere lets go", () => {

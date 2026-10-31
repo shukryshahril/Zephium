@@ -1,3 +1,4 @@
+import { IS_MAC } from "$shared/platform";
 import { reducedMotion } from "./motion";
 
 const IDLE_MS = 4000;
@@ -11,6 +12,8 @@ const IDLE_MS = 4000;
  * window receives gives the field its focus back before the text arrives.
  */
 export function parkCaret(input: HTMLInputElement): () => void {
+  // The fading caret is WebKit on macOS; elsewhere the field keeps its own.
+  if (!IS_MAC) return () => {};
   let timer: ReturnType<typeof setTimeout> | undefined;
   let caret: HTMLElement | null = null;
 
@@ -65,9 +68,14 @@ export function parkCaret(input: HTMLInputElement): () => void {
     input.blur();
   }
 
+  // Anything that can start text brings focus back: characters, AltGr and
+  // dead keys, input methods, deletion and paste; other shortcuts don't.
+  const STARTS_TEXT = new Set(["Backspace", "Delete", "Dead", "Process", "Unidentified"]);
   function wake(event: KeyboardEvent) {
-    if (event.ctrlKey || (event.metaKey && event.key.toLowerCase() !== "v")) return;
-    if (event.key.length !== 1 && event.key !== "Backspace" && event.key !== "Delete") return;
+    const altGraph = event.getModifierState("AltGraph");
+    if (event.ctrlKey && !altGraph) return;
+    if (event.metaKey && event.key.toLowerCase() !== "v") return;
+    if (event.key.length !== 1 && !STARTS_TEXT.has(event.key) && !event.isComposing) return;
     input.focus({ preventScroll: true });
   }
 

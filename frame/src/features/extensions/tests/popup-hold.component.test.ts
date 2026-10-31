@@ -14,6 +14,14 @@ test("the column stays out while the popup has the keyboard", () => {
   expect(attention.wanted()).toBe(false);
 });
 
+test("a hold whose keyboard never comes back to the window still ends", () => {
+  vi.useFakeTimers();
+  holdWhilePopupOpen();
+  window.dispatchEvent(new Event("blur"));
+  vi.advanceTimersByTime(45_000);
+  expect(attention.wanted()).toBe(false);
+});
+
 test("a popup that never takes the keyboard lets go by itself", () => {
   vi.useFakeTimers();
   holdWhilePopupOpen();

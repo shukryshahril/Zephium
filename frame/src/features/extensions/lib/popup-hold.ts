@@ -2,6 +2,10 @@ import * as attention from "$session/attention.svelte";
 
 /** How long a popup has to take the keyboard before the hold lets go. */
 const TAKE_MS = 1500;
+/** The keyboard can come back to the page rather than the window's
+ *  interface (a popup that opened a tab and closed); the hold never
+ *  outlasts this. */
+const LONGEST_MS = 45_000;
 
 /**
  * An extension's popup takes the keyboard from the window, which reads to a
@@ -20,8 +24,10 @@ export function holdWhilePopupOpen(): void {
   const unused = setTimeout(() => {
     if (!taken) done();
   }, TAKE_MS);
+  const longest = setTimeout(done, LONGEST_MS);
   function done() {
     clearTimeout(unused);
+    clearTimeout(longest);
     window.removeEventListener("blur", blurred);
     window.removeEventListener("focus", focused);
     release();

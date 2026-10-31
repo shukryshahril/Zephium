@@ -7308,6 +7308,8 @@ pub fn run() {
                             .is_minimized()
                             .unwrap_or(size.width == 0 || size.height == 0);
                         resize_shell.dispatch(Command::SetWindowVisible(!minimized));
+                        #[cfg(target_os = "windows")]
+                        platform::imp::set_chrome_minimized(&resize_window, minimized);
                         if minimized {
                             return;
                         }
@@ -7334,6 +7336,8 @@ pub fn run() {
                     {
                         let minimized = resize_window.is_minimized().unwrap_or(false);
                         resize_shell.dispatch(Command::SetWindowVisible(!minimized));
+                        #[cfg(target_os = "windows")]
+                        platform::imp::set_chrome_minimized(&resize_window, minimized);
                         if !minimized {
                             // Re-read logical content size at the new scale.
                             // The layout refresh also rebuilds Windows
@@ -7409,6 +7413,8 @@ pub fn run() {
                         // resize notification. Wake content before it can be
                         // interacted with.
                         resize_shell.dispatch(Command::SetWindowVisible(true));
+                        #[cfg(target_os = "windows")]
+                        platform::imp::set_chrome_minimized(&resize_window, false);
                         presence::report_app_active(resize_window.app_handle());
                     }
                     // Losing focus alone does not make a browser tab
@@ -7419,6 +7425,8 @@ pub fn run() {
                         voice::window_blurred(resize_window.app_handle());
                         if resize_window.is_minimized().unwrap_or(false) {
                             resize_shell.dispatch(Command::SetWindowVisible(false));
+                            #[cfg(target_os = "windows")]
+                            platform::imp::set_chrome_minimized(&resize_window, true);
                         }
                         presence::report_app_active(resize_window.app_handle());
                     }

@@ -418,6 +418,12 @@
   // own view can leave standing; leaving the document or the window losing
   // focus ends it too.
   let pointerIn = $state(false);
+  function entered() {
+    pointerIn = true;
+    // Back on the card as it leaves, it comes back.
+    if (away && !peeking && lowered !== undefined) peek();
+    else if (away) clearTimeout(linger);
+  }
   $effect(() => {
     // Leaving the window lets the card go too, wherever it was left from.
     const out = () => {
@@ -481,12 +487,12 @@
   data-reshaping={reshaping}
   data-sidebar-resize-settling={resizeSettling}
   data-header-fresh={headerFresh}
-  data-pointer-in={pointerIn}
-  onpointerenter={() => {
-    pointerIn = true;
-    // Back on the card as it leaves, it comes back.
-    if (away && !peeking && lowered !== undefined) peek();
-    else if (away) clearTimeout(linger);
+  data-pointer-in={pointerIn || attention.wanted()}
+  onpointerenter={entered}
+  onpointermove={() => {
+    // An arrival from the page's own view, or while another window had the
+    // keyboard, can come without an enter; the first move inside counts.
+    if (!pointerIn) entered();
   }}
   onpointerleave={() => {
     pointerIn = false;

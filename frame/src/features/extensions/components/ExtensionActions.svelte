@@ -158,8 +158,7 @@
     background: var(--row-hover);
   }
 
-  .item:focus-visible,
-  .pin:focus-visible {
+  .item:focus-visible {
     outline: 2px solid var(--color-ring);
     outline-offset: -2px;
   }
@@ -198,8 +197,12 @@
       background-color var(--motion-instant) var(--ease-smooth);
   }
 
-  .row:hover .pin,
-  .pin:focus-visible,
+  .pin:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--color-ring);
+    outline-offset: -2px;
+  }
+
   .pin[aria-pressed="true"] {
     opacity: 1;
   }
@@ -209,12 +212,12 @@
     color: var(--color-text);
   }
 
-  .pin:disabled {
-    opacity: 0 !important;
+  .row:hover .pin {
+    opacity: 1;
   }
 
   .row:hover .pin:disabled {
-    opacity: 0.35 !important;
+    opacity: 0.35;
   }
 
   .glyph {

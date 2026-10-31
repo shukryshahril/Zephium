@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { render } from "vitest-browser-svelte";
-import { userEvent } from "vitest/browser";
 import "$styles/global.css";
 import "$shared/ui/Menu/surface.css";
 import ExtensionsSection from "../components/ExtensionsSection.svelte";

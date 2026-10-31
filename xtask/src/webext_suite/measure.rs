@@ -14,7 +14,8 @@ pub(super) struct Sample {
     /// Cumulative CPU seconds per helper process.
     cpu: HashMap<u32, f64>,
     pub(super) rss_kb: u64,
-    pub(super) footprint_bytes: u64,
+    /// Absent where `footprint` reported on none of the helpers.
+    pub(super) footprint_bytes: Option<u64>,
 }
 
 impl Sample {
@@ -50,17 +51,28 @@ pub(super) fn sample(lab: u32, scratch: &Path) -> Option<Sample> {
         .output()
         .ok()?;
     let mut sample = parse_ps(&String::from_utf8_lossy(&ps.stdout))?;
-    sample.footprint_bytes = pids.iter().filter_map(|pid| footprint(*pid, scratch)).sum();
+    let reported: Vec<u64> = pids
+        .iter()
+        .filter_map(|pid| footprint(*pid, scratch))
+        .collect();
+    sample.footprint_bytes = (!reported.is_empty()).then(|| reported.iter().sum());
     Some(sample)
 }
 
+/// `scratch` is shared by every pid of a run, so a failed call must not leave
+/// the previous pid's report to be read again.
 fn footprint(pid: u32, scratch: &Path) -> Option<u64> {
-    Command::new("footprint")
+    let _ = std::fs::remove_file(scratch);
+    let status = Command::new("footprint")
         .args(["--noCategories", "-j"])
         .arg(scratch)
         .args(["-p", &pid.to_string()])
         .output()
-        .ok()?;
+        .ok()?
+        .status;
+    if !status.success() {
+        return None;
+    }
     let report: serde_json::Value = serde_json::from_slice(&std::fs::read(scratch).ok()?).ok()?;
     report.get("total footprint")?.as_u64()
 }

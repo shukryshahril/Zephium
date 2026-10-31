@@ -359,6 +359,9 @@ pub(crate) fn web_extension_store_button(
     let Some(tab) = zephium_core::ids::ItemId::parse(&tab_id) else {
         return false;
     };
+    if zephium_webext::ExtensionId::parse(&extension_id).is_none() {
+        return false;
+    }
     let label_chars = label.chars().count();
     if label_chars == 0 || label_chars > zephium_core::ports::engine::MAX_STORE_BUTTON_LABEL_CHARS {
         return false;

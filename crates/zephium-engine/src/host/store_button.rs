@@ -54,6 +54,21 @@ fn encode(button: &StoreButton) -> String {
     serde_json::json!({ "id": button.extension, "kind": kind, "label": button.label }).to_string()
 }
 
+/// A click from the page counts only on the listing it is for, while that
+/// extension's button is offered, and not twice in quick succession.
+fn click_admitted(
+    listed: bool,
+    shown: Option<&StoreButton>,
+    last_click: Option<Instant>,
+    extension: &str,
+    now: Instant,
+) -> bool {
+    let offered = shown.is_some_and(|button| {
+        button.extension == extension && button.state != StoreButtonState::Adding
+    });
+    listed && offered && last_click.is_none_or(|last| now.duration_since(last) >= CLICK_INTERVAL)
+}
+
 impl EngineHost {
     fn committed_listing(&self, id: ItemId) -> Option<zephium_webext::ExtensionId> {
         if self
@@ -121,15 +136,13 @@ impl EngineHost {
             return;
         };
         let slot = &mut view.store_button;
-        let offered = slot.shown.as_ref().is_some_and(|button| {
-            button.extension == extension && button.state != StoreButtonState::Adding
-        });
-        if !listed
-            || !offered
-            || slot
-                .last_click
-                .is_some_and(|last| last.elapsed() < CLICK_INTERVAL)
-        {
+        if !click_admitted(
+            listed,
+            slot.shown.as_ref(),
+            slot.last_click,
+            extension,
+            Instant::now(),
+        ) {
             return;
         }
         slot.last_click = Some(Instant::now());
@@ -266,5 +279,41 @@ mod tests {
                 "label": "Adding</script>\u{2028}",
             })
         );
+    }
+
+    #[test]
+    fn a_click_is_admitted_only_for_an_offered_button_once_a_second() {
+        const ID: &str = "ddkjiahejlhfcafbddmgiahcphecmpfh";
+        let button = |extension: &str, state| StoreButton {
+            extension: extension.into(),
+            state,
+            label: "Add".into(),
+        };
+        let now = Instant::now();
+        let add = button(ID, StoreButtonState::Add);
+        let admitted = |listed, shown: Option<&StoreButton>, last| {
+            click_admitted(listed, shown, last, ID, now)
+        };
+        assert!(admitted(true, Some(&add), None));
+        assert!(!admitted(false, Some(&add), None), "another listing");
+        assert!(!admitted(true, None, None), "no button shown");
+        assert!(
+            !admitted(
+                true,
+                Some(&button(
+                    "ponfpcnoihfmfllpaingbgckeeldkhle",
+                    StoreButtonState::Add
+                )),
+                None
+            ),
+            "the button is for another extension"
+        );
+        assert!(!admitted(
+            true,
+            Some(&button(ID, StoreButtonState::Adding)),
+            None
+        ));
+        assert!(!admitted(true, Some(&add), Some(now)), "a repeat click");
+        assert!(admitted(true, Some(&add), Some(now - CLICK_INTERVAL)));
     }
 }

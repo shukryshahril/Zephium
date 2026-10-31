@@ -34,6 +34,8 @@ struct Shown {
     shared: RcWeak<Shared>,
     extension: String,
     id: String,
+    /// What the notification shows now, for `update` to merge into.
+    options: Value,
 }
 
 #[derive(Default)]
@@ -83,6 +85,9 @@ pub(crate) fn create(
     if !bundled() {
         return Err("Notifications are unavailable in this build.".into());
     }
+    if CENTER.with(|center| center.borrow().authorized) == Some(false) {
+        return Err("Notifications are turned off for Zephium.".into());
+    }
     let id: String = message
         .get("id")
         .and_then(Value::as_str)
@@ -111,6 +116,9 @@ pub(crate) fn create(
             })
             .map(|(key, _)| key.clone());
         if let Some(key) = existing {
+            if let Some(shown) = center.shown.get_mut(&key) {
+                shown.options = options.clone();
+            }
             return Ok(key);
         }
         // Banners that time out into Notification Center are never reported
@@ -138,6 +146,7 @@ pub(crate) fn create(
                 shared: Rc::downgrade(shared),
                 extension: extension.to_owned(),
                 id: id.clone(),
+                options: options.clone(),
             },
         );
         Ok(key)
@@ -157,9 +166,61 @@ pub(crate) fn create(
         &content,
         None,
     );
+    // A notification the system refused never appeared, so it must not keep
+    // counting against the extension or show up in `getAll`.
+    let delivered = RcBlock::new(move |error: *mut NSError| {
+        if error.is_null() {
+            return;
+        }
+        let identifier = identifier.clone();
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            CENTER.with(|center| center.borrow_mut().shown.remove(&identifier));
+        });
+    });
     UNUserNotificationCenter::currentNotificationCenter()
-        .addNotificationRequest_withCompletionHandler(&request, None);
+        .addNotificationRequest_withCompletionHandler(&request, Some(&delivered));
     Ok(Value::String(id))
+}
+
+/// Changes the shown notification `id` of `extension`, keeping the fields the
+/// update leaves out. False where it is not showing.
+pub(crate) fn update(
+    shared: &Rc<Shared>,
+    extension: &str,
+    name: &str,
+    message: &Value,
+) -> Result<Value, String> {
+    let id = message
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let merged = CENTER.with(|center| {
+        let center = center.borrow();
+        let shown = center.shown.values().find(|shown| {
+            shown.extension == extension
+                && shown.id == id
+                && std::ptr::eq(shown.shared.as_ptr(), Rc::as_ptr(shared))
+        })?;
+        let mut merged = shown.options.as_object().cloned().unwrap_or_default();
+        if let Some(changes) = message.get("options").and_then(Value::as_object) {
+            merged.extend(
+                changes
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+        }
+        Some(Value::Object(merged))
+    });
+    let Some(options) = merged else {
+        return Ok(Value::Bool(false));
+    };
+    create(
+        shared,
+        extension,
+        name,
+        &json!({ "id": id, "options": options }),
+    )?;
+    Ok(Value::Bool(true))
 }
 
 /// Buttons are a category's actions, so each set of titles has a category.
@@ -306,6 +367,7 @@ fn respond(identifier: String, action: String) {
                 shared: shown.shared.clone(),
                 extension: shown.extension.clone(),
                 id: shown.id.clone(),
+                options: Value::Null,
             })
         }
     });
@@ -313,6 +375,7 @@ fn respond(identifier: String, action: String) {
         shared,
         extension,
         id,
+        ..
     }) = shown
     else {
         return;

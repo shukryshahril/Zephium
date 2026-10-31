@@ -551,11 +551,13 @@ impl WebextHost {
             identifier.as_str(),
             "_execute_action" | "_execute_browser_action" | "_execute_page_action"
         ) {
+            // Private windows run no extensions, as the snapshot WebKit gets
+            // leaves them out; a shortcut pressed there does nothing.
             let focused = surface.focused();
             if let Some(tab) = surface
                 .windows()
                 .iter()
-                .find(|w| Some(w.id()) == focused)
+                .find(|w| Some(w.id()) == focused && !w.is_private())
                 .and_then(|w| w.active())
             {
                 entry

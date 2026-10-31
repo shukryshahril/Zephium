@@ -358,7 +358,15 @@ fn baseline(lab: &Path, cache: &Path, origin: &str) -> Outcome {
     steps.extend(idle_steps());
     let (problems, resources, duration) =
         match launch(lab, cache, "baseline", &steps, START_TIMEOUT) {
-            Ok(run) => (Vec::new(), run.resources, run.duration),
+            // Figures from a run that never finished would replace good ones.
+            Ok(run) if run.output.lines().any(|line| line == "DONE") => {
+                (Vec::new(), run.resources, run.duration)
+            }
+            Ok(run) => (
+                vec!["baseline did not finish in time".to_string()],
+                run.resources,
+                run.duration,
+            ),
             Err(error) => (vec![error], Resources::default(), Duration::ZERO),
         };
     Outcome {
@@ -514,6 +522,8 @@ fn launch(
     let mut bytes = Vec::new();
     let mut output = String::new();
     let mut idle_start = None;
+    // Whether the idle window was measured, whatever footprint could say.
+    let mut sampled = false;
     let mut resources = Resources::default();
     let deadline = started + budget;
     let mut last_step = started;
@@ -532,10 +542,11 @@ fn launch(
         }
         if idle_start.is_none() && output.contains("MARK idle-start\n") {
             idle_start = Some(measure::sample(child.id(), &footprints).unwrap_or_default());
-        } else if resources.footprint_mb.is_none() && output.contains("MARK idle-end\n") {
+        } else if !sampled && output.contains("MARK idle-end\n") {
             if let (Some(start), Some(end)) =
                 (&idle_start, measure::sample(child.id(), &footprints))
             {
+                sampled = true;
                 resources = Resources {
                     rss_mb: Some((end.rss_kb as f64 / 1024.0).round()),
                     footprint_mb: end
@@ -556,7 +567,7 @@ fn launch(
         std::thread::sleep(Duration::from_millis(100));
     }
     let duration = started.elapsed();
-    if resources.footprint_mb.is_none() {
+    if !sampled {
         if let Some(last) = measure::sample(child.id(), &footprints) {
             resources = Resources {
                 rss_mb: Some((last.rss_kb as f64 / 1024.0).round()),

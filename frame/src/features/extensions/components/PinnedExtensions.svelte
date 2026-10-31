@@ -73,20 +73,26 @@
     transition: opacity var(--motion-fast) var(--ease-out);
   }
 
+  .pins:focus-within {
+    opacity: 1;
+  }
+
   :global(.browser-sidebar[data-pointer-in="true"]) .pins {
     opacity: 1;
     transition-delay: 160ms;
   }
 
-  :global(.browser-sidebar[data-pointer-in="true"] .address-field:hover) .pins,
-  :global(.address-field:has(.utilities-trigger[data-state="open"])) .pins,
-  .pins:focus-within {
+  :global(.address-field:has(.utilities-trigger[data-state="open"])) .pins {
     opacity: 1;
     transition-delay: 0ms;
   }
 
   :global(.address-field:has(input[data-zephium-address]:focus)) .pins {
     display: none;
+  }
+
+  :global(.browser-sidebar[data-pointer-in="true"] .address-field:hover) .pins {
+    transition-delay: 0ms;
   }
 
   .pin {

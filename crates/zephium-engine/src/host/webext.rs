@@ -533,7 +533,13 @@ impl WebextHost {
             identifier.as_str(),
             "_execute_action" | "_execute_browser_action" | "_execute_page_action"
         ) {
-            if let Some(tab) = surface.windows().first().and_then(|w| w.active()) {
+            let focused = surface.focused();
+            if let Some(tab) = surface
+                .windows()
+                .iter()
+                .find(|w| Some(w.id()) == focused)
+                .and_then(|w| w.active())
+            {
                 entry
                     .bridge
                     .sink

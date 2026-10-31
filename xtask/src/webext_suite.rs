@@ -419,12 +419,16 @@ fn check(lab: &Path, cache: &Path, origin: &str, entry: &Expectation, soak: bool
 }
 
 fn steps(entry: &Expectation, crx: &Path, origin: &str, soak: bool) -> Vec<serde_json::Value> {
-    let mut steps = vec![
-        serde_json::json!({ "load": crx, "compat": true }),
-        serde_json::json!({ "tab": format!("{origin}/blank.html") }),
-        serde_json::json!({ "background": true }),
-        serde_json::json!({ "sleep": SETTLE.as_millis() as u64 }),
-    ];
+    let mut steps = vec![serde_json::json!({ "load": crx, "compat": true })];
+    // The popup is opened first, cold, from a tab with no page behind it:
+    // the browser's fresh new tab, before any site has woken the extension.
+    if entry.popup {
+        steps.push(serde_json::json!({ "blank": true }));
+    } else {
+        steps.push(serde_json::json!({ "tab": format!("{origin}/blank.html") }));
+        steps.push(serde_json::json!({ "background": true }));
+        steps.push(serde_json::json!({ "sleep": SETTLE.as_millis() as u64 }));
+    }
     if entry.popup {
         steps.push(serde_json::json!({ "action": true }));
         steps.push(serde_json::json!({
@@ -439,6 +443,9 @@ fn steps(entry: &Expectation, crx: &Path, origin: &str, soak: bool) -> Vec<serde
             "as": "popup-size"
         }));
         steps.push(serde_json::json!({ "close": "popup" }));
+        steps.push(serde_json::json!({ "tab": format!("{origin}/blank.html") }));
+        steps.push(serde_json::json!({ "background": true }));
+        steps.push(serde_json::json!({ "sleep": SETTLE.as_millis() as u64 }));
     }
     steps.extend(load_steps(origin));
     for (index, check) in entry.check.iter().enumerate() {

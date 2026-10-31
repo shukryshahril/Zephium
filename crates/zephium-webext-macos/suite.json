@@ -92,7 +92,8 @@
     "popup": true,
     "allow": [
       "Can't find variable: document",
-      "browserPromise.runtime.sendMessage"
+      "browserPromise.runtime.sendMessage",
+      "captureVisibleTab"
     ]
   },
   {
@@ -212,7 +213,8 @@
   {
     "name": "Google Translate",
     "id": "aapbdbdomjkkjkaonfhkkikfgjllcleb",
-    "popup": true
+    "popup": true,
+    "allow": ["does not have access to this tab"]
   },
   {
     "name": "Grammarly",
@@ -299,7 +301,8 @@
         "url": "/login.html",
         "eval": "const inField = (doc) => doc.querySelectorAll('[data-lastpass-icon-for]').length >= 2; return inField(document) && inField(document.getElementById('inner').contentDocument)"
       }
-    ]
+    ],
+    "known": "signed out, its in-field icons come and go with its own server settings; unchanged code passed and failed on 2026-10-31"
   },
   {
     "name": "Loom",

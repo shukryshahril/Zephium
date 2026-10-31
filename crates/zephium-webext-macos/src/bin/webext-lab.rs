@@ -7,7 +7,8 @@
 //! A scenario is a JSON array of steps, run in order:
 //! - `{"load": "<dir or .crx>", "compat": true, "id": "<optional id>"}`
 //! - `{"background": true}` starts the last loaded extension's background
-//! - `{"tab": "<url>"}` opens a tab and waits for it to load
+//! - `{"tab": "<url>"}` opens a tab and waits for it to load; `{"blank": true}`
+//!   opens one with no page, as the browser's new tab
 //! - `{"page": "<path>"}` opens one of the extension's pages in a probe view
 //! - `{"eval": "<async function body>", "in": "page" | "tab", "timeout": 5000,
 //!   "as": "<label>"}` prints `RESULT <label> <value>` when labelled
@@ -421,6 +422,22 @@ impl Lab {
                 }
                 next();
             });
+        } else if step.get("blank").is_some() {
+            // A tab with no page behind it, as the browser's new tab is.
+            let id = this.next_tab.get();
+            this.next_tab.set(id + 1);
+            let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
+            let view = unsafe {
+                WKWebView::initWithFrame_configuration(
+                    WKWebView::alloc(this.mtm),
+                    frame,
+                    &this.configuration(),
+                )
+            };
+            this.tabs.borrow_mut().push((id, view));
+            this.active.set(id);
+            this.publish();
+            next();
         } else if let Some(url) = step.get("tab").and_then(Value::as_str) {
             let id = this.open_tab(url, true);
             let view = this.tab_view(id).expect("tab exists");
@@ -451,7 +468,12 @@ impl Lab {
             let id = this.extension.borrow().clone().unwrap_or_default();
             let tab = Some(this.active.get()).filter(|tab| *tab != 0);
             *this.page.borrow_mut() = None;
-            this.runtime.perform_action(&id, tab);
+            // As the browser does: the background first, then the action.
+            let acting = this.clone();
+            let target = id.clone();
+            this.runtime.wake_then(&id, move || {
+                acting.runtime.perform_action(&target, tab);
+            });
             let lab = this.clone();
             let ticks = Cell::new(0u32);
             let waiting = this.clone();

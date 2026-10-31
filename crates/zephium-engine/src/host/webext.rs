@@ -612,7 +612,7 @@ impl WebextHost {
         // WebKit drops what a popup sends while the worker sleeps, and the
         // popup then waits forever; wake it first (immediate when running).
         let waking = extension_id.clone();
-        entry.runtime.start_background(&waking, move |_| {
+        entry.runtime.wake_then(&waking, move || {
             super::dispatch::best_effort_with(move |host| {
                 if let Some(entry) = host.webext.profiles.get(&profile) {
                     // Only a popup consumes the anchor; left behind, it would

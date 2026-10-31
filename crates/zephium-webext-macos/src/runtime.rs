@@ -311,6 +311,36 @@ impl Runtime {
         unsafe { context.loadBackgroundContentWithCompletionHandler(&completion) };
     }
 
+    /// Wakes an extension's background, then runs `then`. A popup opened the
+    /// moment a cold background finishes starting comes up empty when no web
+    /// page is open yet (a fresh new tab), so after a real start `then` waits
+    /// a beat; an already running background goes straight on.
+    pub fn wake_then(&self, id: &str, then: impl FnOnce() + 'static) {
+        const STARTED_MS: u128 = 30;
+        const SETTLE_SECONDS: f64 = 0.15;
+        let asked = std::time::Instant::now();
+        self.start_background(id, move |_| {
+            if asked.elapsed().as_millis() < STARTED_MS {
+                return then();
+            }
+            let then = RefCell::new(Some(then));
+            let fire = RcBlock::new(
+                move |_timer: std::ptr::NonNull<objc2_foundation::NSTimer>| {
+                    if let Some(then) = then.take() {
+                        then();
+                    }
+                },
+            );
+            unsafe {
+                objc2_foundation::NSTimer::scheduledTimerWithTimeInterval_repeats_block(
+                    SETTLE_SECONDS,
+                    false,
+                    &fire,
+                )
+            };
+        });
+    }
+
     /// Offers a site's sign-in challenge to extensions that answer them;
     /// `None` when none did and the person should be asked.
     pub fn auth_required(

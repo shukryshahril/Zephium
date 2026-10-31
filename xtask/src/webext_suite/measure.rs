@@ -51,12 +51,15 @@ pub(super) fn sample(lab: u32, scratch: &Path) -> Option<Sample> {
         .output()
         .ok()?;
     let mut sample = parse_ps(&String::from_utf8_lossy(&ps.stdout))?;
-    let reported: Vec<u64> = pids
-        .iter()
-        .filter_map(|pid| footprint(*pid, scratch))
-        .collect();
-    sample.footprint_bytes = (!reported.is_empty()).then(|| reported.iter().sum());
+    let reported: Vec<Option<u64>> = pids.iter().map(|pid| footprint(*pid, scratch)).collect();
+    sample.footprint_bytes = total(&reported);
     Some(sample)
+}
+
+/// A total missing a helper would read as a change in memory, so it is left
+/// out rather than published short.
+fn total(reported: &[Option<u64>]) -> Option<u64> {
+    reported.iter().copied().sum()
 }
 
 /// `scratch` is shared by every pid of a run, so a failed call must not leave
@@ -110,6 +113,12 @@ fn cpu_seconds(text: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_footprint_total_needs_every_helper() {
+        assert_eq!(total(&[Some(3), Some(4)]), Some(7));
+        assert_eq!(total(&[Some(3), None]), None);
+    }
 
     #[test]
     fn reads_helper_services_from_launchctl() {

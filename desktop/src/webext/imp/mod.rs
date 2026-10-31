@@ -674,6 +674,7 @@ pub(in crate::webext) async fn list(
                 has_options,
                 held_update: entry.held_update,
                 sideloaded: entry.sideloaded,
+                pinned: entry.pinned,
             }
         })
         .collect())
@@ -706,6 +707,7 @@ fn extension_state(
 
 enum RegistryMutation {
     Enabled { id: String, enabled: bool },
+    Pinned { id: String, pinned: bool },
     Access { id: String, access: Access },
     Uninstall { id: String },
 }
@@ -741,6 +743,7 @@ fn execute_mutation(
     let mut registry = extensions.registry(profile);
     let id = match &mutation {
         RegistryMutation::Enabled { id, .. }
+        | RegistryMutation::Pinned { id, .. }
         | RegistryMutation::Access { id, .. }
         | RegistryMutation::Uninstall { id } => id,
     };
@@ -757,6 +760,12 @@ fn execute_mutation(
         RegistryMutation::Access { access, .. } => {
             registry.extensions[position].access = access;
             None
+        }
+        RegistryMutation::Pinned { pinned, .. } => {
+            // Where its button sits is the frame's business; the runtime
+            // has nothing to reload.
+            registry.extensions[position].pinned = pinned;
+            return extensions.save_existing(profile, &registry);
         }
         RegistryMutation::Uninstall { .. } => Some(registry.extensions.remove(position)),
     };
@@ -807,6 +816,25 @@ pub(in crate::webext) async fn set_enabled(
         RegistryMutation::Enabled {
             id: id.to_owned(),
             enabled,
+        },
+    )
+    .await
+}
+
+pub(in crate::webext) async fn set_pinned(
+    shell: &Handle,
+    extensions: &WebExtensions,
+    id: &str,
+    pinned: bool,
+) -> Result<(), String> {
+    let profile = target(shell, None).await?.profile;
+    mutate_profile(
+        shell,
+        extensions,
+        profile,
+        RegistryMutation::Pinned {
+            id: id.to_owned(),
+            pinned,
         },
     )
     .await

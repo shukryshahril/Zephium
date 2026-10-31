@@ -24,8 +24,9 @@
   import { mediaPlayer } from "$domain/media-player";
   import { UpdateNotice } from "$features/updates";
   import { EssentialsRail } from "$features/essentials";
-  import { ExtensionsSection } from "$features/extensions";
+  import { ExtensionsSection, PinnedExtensions } from "$features/extensions";
   import { loadWebExtensionManager, StoreInstallRail } from "$features/webext";
+  import { webext } from "$domain/webext";
   import { sidebarTree } from "$features/tabs";
   import { SidebarBody } from "$features/tabs";
   import { TabList } from "$features/tabs";
@@ -367,8 +368,9 @@
             whole column, field included; the tray rides the field itself,
             because everything in it acts on the page the field names.
           -->
-            <AddressField {compact}>
+            <AddressField {compact} restStart={webext.pinnedCount() > 0}>
               {#snippet trailing(page)}
+                <PinnedExtensions />
                 <UtilityTray
                   label={page === null
                     ? m.utilities()

@@ -34,6 +34,11 @@ export const error = () => failure;
 export const accessRequest = () => accessQueue[0] ?? null;
 export const isAnswering = () => answering;
 export const named = (id: string) => installed.find((extension) => extension.id === id) ?? null;
+export const byInstall = (install: string) =>
+  installed.find((extension) => extension.install_id === install) ?? null;
+/** Buttons the address field has room for beside the tray. */
+export const MAX_PINNED = 3;
+export const pinnedCount = () => installed.filter((extension) => extension.pinned).length;
 export const isRemovalAsked = (id: string) => removalAsked === id;
 export const settleRemovalAsk = () => (removalAsked = null);
 
@@ -155,6 +160,18 @@ export async function setEnabled(id: string, enabled: boolean): Promise<void> {
   const result = await commands.webExtensionSetEnabled(id, enabled);
   failure = result.status === "ok" ? null : result.error;
   await refresh();
+}
+
+export async function setPinned(id: string, pinned: boolean): Promise<void> {
+  if (pinned && pinnedCount() >= MAX_PINNED) return;
+  installed = installed.map((extension) =>
+    extension.id === id ? { ...extension, pinned } : extension,
+  );
+  const result = await commands.webExtensionSetPinned(id, pinned);
+  if (result.status !== "ok") {
+    failure = result.error;
+    await refresh();
+  }
 }
 
 export async function setAccess(id: string, mode: string, sites: string[] = []): Promise<void> {

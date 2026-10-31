@@ -31,9 +31,13 @@
 
   let {
     compact = false,
+    restStart = false,
     trailing,
   }: {
     compact?: boolean;
+    /** Rest at the start rather than the centre: the far end holds more
+     *  than the tray, and a centred address would lose its room to them. */
+    restStart?: boolean;
     /** Controls that act on the page, at the far end of the field. Told which
      *  page it is, or null where there is no site to describe. */
     trailing?: Snippet<[SitePage | null]>;
@@ -334,9 +338,9 @@
         aria-describedby={failed ? "address-error" : undefined}
         onfocus={beginEditing}
         onblur={endEditing}
-        style:text-align={editing ? "start" : "center"}
+        style:text-align={editing ? "start" : restStart ? "left" : "center"}
         style:direction={editing ? null : "rtl"}
-        style:padding-left={editing ? "0" : "var(--address-centering)"}
+        style:padding-left={editing || restStart ? "0" : "var(--address-centering)"}
         class="min-w-0 flex-1 bg-transparent text-[13.5px] text-ellipsis text-label-secondary outline-none placeholder:text-faint focus:text-text"
       />
       {#if finding}

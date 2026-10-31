@@ -38,6 +38,7 @@ function extension(overrides: Partial<WebExtensionView> = {}): WebExtensionView 
     has_options: true,
     held_update: null,
     sideloaded: false,
+    pinned: false,
     ...overrides,
   };
 }

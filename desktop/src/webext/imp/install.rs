@@ -299,6 +299,7 @@ pub(super) fn stage(
             held_update: None,
             access,
             sideloaded: from_file,
+            pinned: existing.is_some_and(|entry| entry.pinned),
         };
         Ok(Staged {
             review: WebExtensionReview {

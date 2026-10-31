@@ -32,6 +32,7 @@ const extension: WebExtensionView = {
   has_options: false,
   held_update: null,
   sideloaded: false,
+  pinned: false,
 };
 
 test("startup preparation failure becomes visible and retry retains the displayed installation", async () => {

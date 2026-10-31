@@ -2,9 +2,7 @@ import * as attention from "$session/attention.svelte";
 
 /** How long a popup has to take the keyboard before the hold lets go. */
 const TAKE_MS = 1500;
-/** The keyboard can come back to the page rather than the window's
- *  interface (a popup that opened a tab and closed); the hold never
- *  outlasts this. */
+/** Where nothing says the popup went, the hold never outlasts this. */
 const LONGEST_MS = 45_000;
 
 /**
@@ -21,6 +19,9 @@ export function holdWhilePopupOpen(): void {
     if (!taken) return;
     done();
   };
+  // A click on the page closes the popup but leaves the keyboard there;
+  // native says the popup went instead.
+  const closed = () => done();
   const unused = setTimeout(() => {
     if (!taken) done();
   }, TAKE_MS);
@@ -30,8 +31,10 @@ export function holdWhilePopupOpen(): void {
     clearTimeout(longest);
     window.removeEventListener("blur", blurred);
     window.removeEventListener("focus", focused);
+    window.removeEventListener("zephium:popover-closed", closed);
     release();
   }
   window.addEventListener("blur", blurred);
   window.addEventListener("focus", focused);
+  window.addEventListener("zephium:popover-closed", closed);
 }

@@ -29,3 +29,11 @@ test("a popup that never takes the keyboard lets go by itself", () => {
   vi.advanceTimersByTime(1500);
   expect(attention.wanted()).toBe(false);
 });
+
+test("the popup closing by a click on the page lets the column go", () => {
+  vi.useFakeTimers();
+  holdWhilePopupOpen();
+  window.dispatchEvent(new Event("blur"));
+  window.dispatchEvent(new CustomEvent("zephium:popover-closed"));
+  expect(attention.wanted()).toBe(false);
+});

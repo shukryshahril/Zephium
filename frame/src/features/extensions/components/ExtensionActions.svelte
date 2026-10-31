@@ -6,6 +6,7 @@
   import * as m from "$shared/i18n/messages";
   import Icon from "$shared/ui/Icon";
   import ExtensionActionIcon from "./ExtensionActionIcon.svelte";
+  import { holdWhilePopupOpen } from "../lib/popup-hold";
 
   let profileId = $derived(tabs.profile()?.id ?? null);
   let tabId = $derived(tabs.activeId());
@@ -28,6 +29,7 @@
   function invoke(event: MouseEvent, action: (typeof actions)[number]) {
     const target = event.currentTarget;
     if (profileId === null || tabId === null || !(target instanceof HTMLButtonElement)) return;
+    if (action.presents_popup) holdWhilePopupOpen();
     void extensions.invoke(profileId, tabId, action, anchor(target));
   }
 

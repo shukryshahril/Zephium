@@ -4,6 +4,7 @@
   import { webext } from "$domain/webext";
   import * as m from "$shared/i18n/messages";
   import ExtensionActionIcon from "./ExtensionActionIcon.svelte";
+  import { holdWhilePopupOpen } from "../lib/popup-hold";
 
   let profileId = $derived(tabs.profile()?.id ?? null);
   let tabId = $derived(tabs.activeId());
@@ -17,6 +18,7 @@
   function invoke(event: MouseEvent, action: (typeof pinned)[number]) {
     const target = event.currentTarget;
     if (profileId === null || tabId === null || !(target instanceof HTMLElement)) return;
+    if (action.presents_popup) holdWhilePopupOpen();
     void extensions.invoke(profileId, tabId, action, target.getBoundingClientRect());
   }
 

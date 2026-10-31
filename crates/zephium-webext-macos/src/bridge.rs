@@ -115,6 +115,12 @@ pub(crate) fn handle(
                 .unwrap_or_default();
             notifications::create(shared, &id, &name, &message)
         }),
+        Some("notifications.update") => gate("notifications").and_then(|()| {
+            let name = unsafe { context.webExtension().displayName() }
+                .map(|name| name.to_string())
+                .unwrap_or_default();
+            notifications::update(shared, &id, &name, &message)
+        }),
         Some("notifications.clear") => gate("notifications").map(|()| {
             let target = message
                 .get("id")

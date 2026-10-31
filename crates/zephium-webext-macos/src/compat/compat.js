@@ -781,10 +781,7 @@
     pin(target, "PermissionLevel", Object.freeze({ GRANTED: "granted", DENIED: "denied" }));
     pin(target, "create", show);
     pin(target, "update", (id, options, callback) =>
-      withCallback(
-        native("notifications.getAll", {}).then((all) => (all && all[id] ? show(id, options).then(() => true) : false)),
-        callback,
-      ),
+      withCallback(native("notifications.update", { id: String(id), options: options || {} }), callback),
     );
     pin(target, "clear", (id, callback) => withCallback(native("notifications.clear", { id: String(id) }), callback));
     pin(target, "getAll", (callback) => withCallback(native("notifications.getAll", {}), callback));

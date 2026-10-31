@@ -38,6 +38,8 @@ function context(kind) {
             return null;
           case "notifications.create":
             return message.id;
+          case "notifications.update":
+            return message.id === "n1";
           case "idle.query":
             return message.interval >= 15 ? "active" : "invalid";
           default:
@@ -218,6 +220,8 @@ test("pages and workers get every API fix", async () => {
     assert.equal(typeof chrome.notifications.create, "function", kind);
     assert.equal(await chrome.notifications.create("n1", { title: "t", message: "m" }), "n1", kind);
     assert.match(await chrome.notifications.create({ title: "t", message: "m" }), /^zephium-/, kind);
+    assert.equal(await chrome.notifications.update("n1", { progress: 50 }), true, kind);
+    assert.equal(await chrome.notifications.update("gone", { progress: 50 }), false, kind);
     assert.match(chrome.identity.getRedirectURL("cb"), /^https:\/\/abcdefghijklmnopabcdefghijklmnop\.chromiumapp\.org\/cb$/);
     const saving = await chrome.privacy.services.passwordSavingEnabled.get({});
     assert.equal(saving.value, true, kind);

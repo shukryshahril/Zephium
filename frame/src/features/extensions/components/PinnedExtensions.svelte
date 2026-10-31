@@ -29,8 +29,8 @@
 </script>
 
 <!--
-  Pinned extensions keep their buttons in the address field, beside the tray
-  that holds the rest. They step aside while an address is being typed.
+  Pinned extensions keep their buttons at the head of the tab list, beside
+  the plus; the tray on the address holds the rest.
 -->
 {#if pinned.length > 0}
   <div class="pins" role="group" aria-label={m.webext_page_title()}>
@@ -61,48 +61,23 @@
 {/if}
 
 <style>
-  /* One group with the tray beside them, and shown when it is: with the
-     pointer in the column after a beat, at once over the field or with the
-     tray open. Typing an address needs their room. */
+  /* Beside the plus that opens a tab, in the row's own shape. */
   .pins {
     display: flex;
     flex: none;
     align-items: center;
-    margin-inline-end: -8px;
-    opacity: 0;
-    transition: opacity var(--motion-fast) var(--ease-out);
-  }
-
-  .pins:focus-within {
-    opacity: 1;
-  }
-
-  :global(.browser-sidebar[data-pointer-in="true"]) .pins {
-    opacity: 1;
-    transition-delay: 160ms;
-  }
-
-  :global(.address-field:has(.utilities-trigger[data-state="open"])) .pins {
-    opacity: 1;
-    transition-delay: 0ms;
-  }
-
-  :global(.address-field:has(input[data-zephium-address]:focus)) .pins {
-    display: none;
-  }
-
-  :global(.browser-sidebar[data-pointer-in="true"] .address-field:hover) .pins {
-    transition-delay: 0ms;
+    gap: 2px;
+    animation: interface-fade var(--motion-fast) var(--ease-out) both;
   }
 
   .pin {
     display: grid;
     place-items: center;
-    inline-size: 26px;
-    block-size: 26px;
+    inline-size: 30px;
+    block-size: 30px;
     padding: 0;
     border: 0;
-    border-radius: var(--radius-inset);
+    border-radius: 50%;
     background: none;
     cursor: default;
     outline: none;

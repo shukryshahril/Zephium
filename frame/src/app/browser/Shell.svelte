@@ -26,7 +26,6 @@
   import { EssentialsRail } from "$features/essentials";
   import { ExtensionsSection, PinnedExtensions } from "$features/extensions";
   import { loadWebExtensionManager, StoreInstallRail } from "$features/webext";
-  import { webext } from "$domain/webext";
   import { sidebarTree } from "$features/tabs";
   import { SidebarBody } from "$features/tabs";
   import { TabList } from "$features/tabs";
@@ -368,9 +367,8 @@
             whole column, field included; the tray rides the field itself,
             because everything in it acts on the page the field names.
           -->
-            <AddressField {compact} restStart={webext.pinnedCount() > 0}>
+            <AddressField {compact}>
               {#snippet trailing(page)}
-                <PinnedExtensions />
                 <UtilityTray
                   label={page === null
                     ? m.utilities()
@@ -397,7 +395,9 @@
             {#if splitting}<p class="shrink-0 px-3 pb-1 text-[12px] text-accent" aria-live="polite">
                 {m.choose_split()}
               </p>{/if}
-            <SidebarBody pinned={tree.pinned} today={tree.today} {splitting} onSelect={selectTab} />
+            <SidebarBody pinned={tree.pinned} today={tree.today} {splitting} onSelect={selectTab}>
+              {#snippet extras()}<PinnedExtensions />{/snippet}
+            </SidebarBody>
             <!-- Brief notices and downloads sit at the foot of the column, by the dock. -->
             <SidebarNotice />
             {#if tabs.profile()?.id}<DownloadStatus

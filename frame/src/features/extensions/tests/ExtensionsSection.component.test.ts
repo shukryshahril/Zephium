@@ -163,8 +163,8 @@ test("a row pins its extension to the address field, up to three", async () => {
   native.actions = [action("a"), action("b"), action("c"), action("d")];
   native.pinned = ["b", "c", "d"];
   const screen = await render(ExtensionsSection);
-  await expect.element(screen.getByRole("button", { name: "Pin to address field" })).toBeDisabled();
-  const unpin = screen.getByRole("button", { name: "Unpin from address field" }).first();
+  await expect.element(screen.getByRole("button", { name: "Pin to sidebar" })).toBeDisabled();
+  const unpin = screen.getByRole("button", { name: "Unpin from sidebar" }).first();
   await expect.element(unpin).toHaveAttribute("aria-pressed", "true");
   await unpin.click();
   expect(native.setPinned).toHaveBeenCalledExactlyOnceWith("ext-b", false);

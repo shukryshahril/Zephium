@@ -44,11 +44,12 @@
   let progress = $derived(current ? downloadProgress(current) : undefined);
   // A hidden column comes out as a download sets off, and stays while one
   // waits on a decision.
-  const announced = new Set<string>();
+  // Bookkeeping only; nothing redraws from it.
+  const announced: Record<string, true> = {};
   $effect(() => {
     for (const entry of active) {
-      if (announced.has(entry.id)) continue;
-      announced.add(entry.id);
+      if (announced[entry.id]) continue;
+      announced[entry.id] = true;
       if (entry.state === "pending" || entry.state === "receiving") attention.pulse(3500);
     }
   });

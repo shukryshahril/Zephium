@@ -245,6 +245,9 @@ impl Runtime {
                     Some(extension) => activate(&shared, &controller, extension, spec),
                     None => Err(describe(unsafe { error.as_ref() })),
                 };
+                if let Ok(loaded) = &result {
+                    crate::privacy::restore(&shared, &loaded.id);
+                }
                 done(result);
             });
         unsafe {
@@ -269,6 +272,7 @@ impl Runtime {
         let target = id.to_string();
         let finish = move || {
             unload(&shared, &controller, &target);
+            crate::privacy::erase(&shared, &target);
             erase_storage(&controller, &shared.host, &target);
             done();
         };
@@ -833,6 +837,7 @@ fn unload(shared: &Rc<Shared>, controller: &WKWebExtensionController, id: &str) 
     crate::privacy::forget(shared, id);
     crate::notifications::forget(shared, id);
     shared.popouts.borrow_mut().remove(id);
+    crate::api::forget(id);
     crate::cookies::refresh(shared);
     unsafe { controller.unloadExtensionContext_error(&loaded.context) }.is_ok()
 }

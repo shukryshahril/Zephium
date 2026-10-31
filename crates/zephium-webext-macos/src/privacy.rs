@@ -6,7 +6,10 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use serde_json::{json, Value};
+use objc2_foundation::{NSString, NSUserDefaults};
+use serde_json::{json, Map, Value};
+
+use objc2::rc::Retained;
 
 use crate::runtime::Shared;
 use crate::{api, events};
@@ -72,6 +75,7 @@ pub(crate) fn set(shared: &Rc<Shared>, extension: &str, message: &Value) -> Resu
         .0
         .borrow_mut()
         .insert(setting.clone(), (extension.to_owned(), value));
+    remember(shared, extension, &setting, Some(value));
     changed(shared, &setting);
     Ok(Value::Null)
 }
@@ -90,6 +94,7 @@ pub(crate) fn clear(
         }
     };
     if cleared {
+        remember(shared, extension, &setting, None);
         changed(shared, &setting);
     }
     Ok(Value::Null)
@@ -145,5 +150,92 @@ pub(crate) fn forget(shared: &Rc<Shared>, extension: &str) {
 pub(crate) fn forget_if_revoked(shared: &Rc<Shared>, extension: &str) {
     if !api::granted(shared, extension, "privacy") {
         forget(shared, extension);
+        erase(shared, extension);
+    }
+}
+
+// What extensions set lasts across launches, as in Chrome: password managers
+// turn the browser's filling off once, at setup. It is kept per profile and
+// applies again whenever the extension is loaded.
+
+fn defaults_key(shared: &Shared) -> Retained<NSString> {
+    let store = unsafe { shared.store.identifier() }
+        .map(|id| id.UUIDString().to_string())
+        .unwrap_or_else(|| "default".to_owned());
+    NSString::from_str(&format!("ZephiumExtensionPrivacy.{store}"))
+}
+
+fn saved(shared: &Shared) -> Map<String, Value> {
+    NSUserDefaults::standardUserDefaults()
+        .stringForKey(&defaults_key(shared))
+        .and_then(|text| serde_json::from_str(&text.to_string()).ok())
+        .unwrap_or_default()
+}
+
+fn save(shared: &Shared, all: &Map<String, Value>) {
+    let defaults = NSUserDefaults::standardUserDefaults();
+    let key = defaults_key(shared);
+    if all.is_empty() {
+        defaults.removeObjectForKey(&key);
+    } else {
+        let text = NSString::from_str(&Value::Object(all.clone()).to_string());
+        unsafe { defaults.setObject_forKey(Some(&text), &key) };
+    }
+}
+
+fn remember(shared: &Shared, extension: &str, setting: &str, value: Option<bool>) {
+    let mut all = saved(shared);
+    let mine = all
+        .entry(extension.to_owned())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Value::Object(mine) = mine {
+        match value {
+            Some(value) => {
+                mine.insert(setting.to_owned(), Value::Bool(value));
+            }
+            None => {
+                mine.remove(setting);
+            }
+        }
+        if mine.is_empty() {
+            all.remove(extension);
+        }
+    }
+    save(shared, &all);
+}
+
+/// Drops what an uninstalled extension, or one without the permission, set.
+pub(crate) fn erase(shared: &Shared, extension: &str) {
+    let mut all = saved(shared);
+    if all.remove(extension).is_some() {
+        save(shared, &all);
+    }
+}
+
+/// Applies again what a just-loaded extension set before, where no other
+/// extension has taken the setting since.
+pub(crate) fn restore(shared: &Rc<Shared>, extension: &str) {
+    if !api::granted(shared, extension, "privacy") {
+        return;
+    }
+    let Some(Value::Object(mine)) = saved(shared).remove(extension) else {
+        return;
+    };
+    let applied: Vec<String> = {
+        let mut overrides = shared.privacy.0.borrow_mut();
+        let mut applied = Vec::new();
+        for (setting, value) in mine {
+            let Some(value) = value.as_bool() else {
+                continue;
+            };
+            if default_of(&setting).is_some() && !overrides.contains_key(&setting) {
+                overrides.insert(setting.clone(), (extension.to_owned(), value));
+                applied.push(setting);
+            }
+        }
+        applied
+    };
+    for setting in applied {
+        changed(shared, &setting);
     }
 }

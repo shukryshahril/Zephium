@@ -8,6 +8,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use url::Url;
 use zephium_core::http_auth::{
@@ -38,7 +40,14 @@ impl PendingNative {
     }
 }
 
+#[cfg(target_os = "macos")]
+static NEXT_BROKER: AtomicU64 = AtomicU64::new(1);
+
 pub(super) struct HttpAuthBroker {
+    /// Request numbers restart with every broker, so an extension's answer
+    /// names the broker that offered it and is dropped by a replacement view.
+    #[cfg(target_os = "macos")]
+    generation: u64,
     item: Rc<Cell<ItemId>>,
     permit: EventPermit,
     sink: Sink,
@@ -49,6 +58,8 @@ pub(super) struct HttpAuthBroker {
 impl HttpAuthBroker {
     pub(super) fn new(item: Rc<Cell<ItemId>>, permit: EventPermit, sink: Sink) -> Rc<Self> {
         Rc::new(Self {
+            #[cfg(target_os = "macos")]
+            generation: NEXT_BROKER.fetch_add(1, Ordering::Relaxed),
             item,
             permit,
             sink,
@@ -132,7 +143,10 @@ impl HttpAuthBroker {
                 tab: None,
             };
             let offered = prompt.clone();
-            if super::dispatch::try_with(move |host| host.offer_http_auth(item, offered, details)) {
+            let generation = self.generation;
+            if super::dispatch::try_with(move |host| {
+                host.offer_http_auth(item, generation, offered, details)
+            }) {
                 return;
             }
         }
@@ -306,6 +320,7 @@ impl EngineHost {
     fn offer_http_auth(
         &mut self,
         item: ItemId,
+        generation: u64,
         prompt: HttpAuthPrompt,
         mut details: zephium_webext_macos::AuthDetails,
     ) {
@@ -315,7 +330,7 @@ impl EngineHost {
         };
         let settle = move |answer: Option<zephium_webext_macos::AuthAnswer>| {
             let _ = super::dispatch::try_with(move |host| {
-                host.settle_http_auth_offer(item, prompt, answer)
+                host.settle_http_auth_offer(item, generation, prompt, answer)
             });
         };
         match profile {
@@ -332,12 +347,16 @@ impl EngineHost {
     fn settle_http_auth_offer(
         &mut self,
         item: ItemId,
+        generation: u64,
         prompt: HttpAuthPrompt,
         answer: Option<zephium_webext_macos::AuthAnswer>,
     ) {
         let Some(view) = self.views.get(&item) else {
             return;
         };
+        if view.http_auth.generation != generation {
+            return;
+        }
         match answer {
             Some(zephium_webext_macos::AuthAnswer::Credentials { username, password }) => {
                 match HttpCredentials::new(username, password) {

@@ -41,6 +41,9 @@ use zephium_webext_macos::{
     TabSnapshot, WindowSnapshot,
 };
 
+#[path = "lab/data.rs"]
+mod data;
+
 const WINDOW: u64 = 1;
 
 fn main() {
@@ -72,6 +75,7 @@ fn main() {
 
 struct LabHost {
     lab: RefCell<std::rc::Weak<Lab>>,
+    data: data::LabData,
 }
 
 impl Host for LabHost {
@@ -165,10 +169,70 @@ impl Host for LabHost {
             _ => done(Err("not supported by the lab".into())),
         }
     }
+
+    fn browser_data(
+        &self,
+        _extension: &str,
+        call: zephium_core::extension_data::ExtensionDataCall,
+        done: Box<dyn FnOnce(zephium_core::extension_data::ExtensionDataReply)>,
+    ) {
+        let (reply, change) = self.data.answer(call);
+        let lab = self.lab.borrow().clone();
+        let heard = change.filter(|change| self.data.heard(change));
+        // The shell answers from another thread, later.
+        after(10, move || {
+            done(reply);
+            if let (Some(change), Some(lab)) = (heard, lab.upgrade()) {
+                println!("CHANGE {change:?}");
+                lab.runtime.data_changed(change);
+            }
+        });
+    }
+
+    fn downloads(
+        &self,
+        request: zephium_webext_macos::DownloadRequest,
+        done: Box<dyn FnOnce(Result<zephium_webext_macos::DownloadAnswer, String>)>,
+    ) {
+        let started = matches!(request, zephium_webext_macos::DownloadRequest::Start { .. });
+        let erased = match request {
+            zephium_webext_macos::DownloadRequest::Erase(id) => Some(id),
+            _ => None,
+        };
+        let (answer, changed) = self.data.download(request);
+        let lab = self.lab.borrow().clone();
+        after(10, move || {
+            done(answer);
+            let Some(lab) = lab.upgrade() else { return };
+            let report = |lab: &Lab, erased: Vec<u64>| {
+                if lab.runtime.hears_downloads() {
+                    let items = lab.host.data.downloads.borrow().clone();
+                    lab.runtime.downloads_changed(items, erased);
+                }
+            };
+            if changed {
+                report(&lab, erased.into_iter().collect());
+            }
+            // A started download finishes a moment later.
+            if started {
+                after(100, move || {
+                    if lab.host.data.finish_downloads() {
+                        report(&lab, Vec::new());
+                    }
+                });
+            }
+        });
+    }
+
+    fn data_interest(&self, interest: zephium_core::extension_data::ExtensionDataInterest) {
+        println!("INTEREST {interest:?}");
+        self.data.interest.set(interest);
+    }
 }
 
 struct Lab {
     mtm: MainThreadMarker,
+    host: Rc<LabHost>,
     window: Retained<NSWindow>,
     runtime: Runtime,
     steps: RefCell<VecDeque<Value>>,
@@ -197,6 +261,7 @@ impl Lab {
 
         let host = Rc::new(LabHost {
             lab: RefCell::new(std::rc::Weak::new()),
+            data: Default::default(),
         });
         // WebKit's in-memory controller never delivers extension pages'
         // messages to the worker, so the lab uses a persistent profile: fresh
@@ -215,6 +280,7 @@ impl Lab {
         let _ = std::fs::create_dir_all(&scratch);
         let lab = Rc::new(Self {
             mtm,
+            host: host.clone(),
             window,
             runtime,
             steps: RefCell::new(VecDeque::new()),

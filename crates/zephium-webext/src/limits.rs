@@ -63,27 +63,6 @@ const GAPS: &[(&[Uses], &str, u8)] = &[
         "Can't block requests the old way (webRequestBlocking)",
         MAC,
     ),
-    (
-        &[Permission("history")],
-        "Can't read your browsing history",
-        MAC,
-    ),
-    (
-        &[Permission("bookmarks")],
-        "Can't read or change your bookmarks",
-        MAC,
-    ),
-    (&[Permission("downloads")], "Can't manage downloads", MAC),
-    (
-        &[Permission("sessions")],
-        "Can't restore recently closed tabs",
-        MAC,
-    ),
-    (
-        &[Permission("topSites")],
-        "Can't read your most visited sites",
-        MAC,
-    ),
     (&[Permission("tabGroups")], "Can't manage tab groups", MAC),
     (
         &[Permission("readingList")],
@@ -257,7 +236,7 @@ mod tests {
     fn declared_pages_and_old_style_blocking_are_named() {
         let raw = json!({
             "manifest_version": 2,
-            "permissions": ["webRequest", "webRequestBlocking", "history", "system.cpu", "<all_urls>"],
+            "permissions": ["webRequest", "webRequestBlocking", "tabGroups", "system.cpu", "<all_urls>"],
             "devtools_page": "devtools.html",
             "chrome_url_overrides": {"newtab": "tab.html"}
         });
@@ -267,7 +246,7 @@ mod tests {
                 "Developer tools panels aren't available",
                 "Can't replace the new tab page",
                 "Can't block requests the old way (webRequestBlocking)",
-                "Can't read your browsing history",
+                "Can't manage tab groups",
                 "Can't read system information",
             ]
         );
@@ -278,6 +257,12 @@ mod tests {
                 "Can't replace the new tab page"
             ]
         );
+    }
+
+    #[test]
+    fn browser_data_the_browser_keeps_is_not_named() {
+        let raw = json!({"manifest_version": 3, "permissions": ["history", "bookmarks", "topSites", "sessions", "downloads"]});
+        assert!(assess(raw, Platform::Macos).is_empty());
     }
 
     #[test]

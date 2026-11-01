@@ -386,7 +386,7 @@
   };
 
   // Permissions of the APIs the browser implements; WebKit doesn't know them.
-  const BROWSER_PERMISSIONS = new Set(["idle", "notifications", "privacy", "webRequestAuthProvider"]);
+  const BROWSER_PERMISSIONS = new Set(["bookmarks", "downloads", "downloads.open", "history", "idle", "notifications", "privacy", "sessions", "topSites", "webRequestAuthProvider"]);
   const manifest = (() => {
     try {
       return runtime.getManifest() || {};
@@ -655,6 +655,153 @@
         DEFAULT: "default", DEFAULT_PUBLIC_AND_PRIVATE_INTERFACES: "default_public_and_private_interfaces",
         DEFAULT_PUBLIC_INTERFACE_ONLY: "default_public_interface_only", DISABLE_NON_PROXIED_UDP: "disable_non_proxied_udp",
       }),
+    });
+  }
+
+  // Browser data lives in the browser's own stores; WebKit has no API for it.
+  const dataEvent = (name) => (hub ? hub.event(name) : makeEvent());
+  const dataCall = (api) => (details, callback) => withCallback(native(api, { details }), callback);
+
+  if (!isContent && !chromeApi.history && declares("history")) {
+    pin(chromeApi, "history", {
+      TransitionType: Object.freeze({
+        LINK: "link", TYPED: "typed", AUTO_BOOKMARK: "auto_bookmark", AUTO_SUBFRAME: "auto_subframe",
+        MANUAL_SUBFRAME: "manual_subframe", GENERATED: "generated", AUTO_TOPLEVEL: "auto_toplevel",
+        FORM_SUBMIT: "form_submit", RELOAD: "reload", KEYWORD: "keyword", KEYWORD_GENERATED: "keyword_generated",
+      }),
+      search: dataCall("history.search"),
+      getVisits: dataCall("history.getVisits"),
+      addUrl: dataCall("history.addUrl"),
+      deleteUrl: dataCall("history.deleteUrl"),
+      deleteRange: dataCall("history.deleteRange"),
+      deleteAll: (callback) => dataCall("history.deleteAll")({}, callback),
+      onVisited: dataEvent("history.onVisited"),
+      onVisitRemoved: dataEvent("history.onVisitRemoved"),
+    });
+  }
+
+  // Recently closed tabs; the browser reopens tabs, not whole windows, and
+  // syncs no devices. A reopened tab is the active one, which tabs.query
+  // describes in full.
+  if (!isContent && !chromeApi.sessions && declares("sessions")) {
+    const restore = (sessionId) =>
+      native("sessions.restore", { sessionId }).then(async (restored) => {
+        try {
+          const [tab] = await chromeApi.tabs.query({ active: true, lastFocusedWindow: true });
+          if (tab && tab.url === restored.tab.url) restored.tab = tab;
+        } catch {}
+        return restored;
+      });
+    pin(chromeApi, "sessions", {
+      MAX_SESSION_RESULTS: 25,
+      getRecentlyClosed: (filter, callback) =>
+        typeof filter === "function"
+          ? withCallback(native("sessions.getRecentlyClosed", {}), filter)
+          : withCallback(native("sessions.getRecentlyClosed", { filter }), callback),
+      getDevices: (filter, callback) =>
+        withCallback(Promise.resolve([]), typeof filter === "function" ? filter : callback),
+      restore: (sessionId, callback) =>
+        typeof sessionId === "function" ? withCallback(restore(), sessionId) : withCallback(restore(sessionId), callback),
+      onChanged: dataEvent("sessions.onChanged"),
+    });
+  }
+
+  // Downloads go through the browser's download manager with the same
+  // admission and prompts as the page in front. It keeps a download's origin
+  // and file name, never its full address or path.
+  if (!isContent && !chromeApi.downloads && declares("downloads")) {
+    const MAX_DATA = 32 * 1024 * 1024;
+    const ask = (op, fields, callback) => withCallback(native(`downloads.${op}`, fields), callback);
+    const byId = (op) => (id, callback) => ask(op, { id }, callback);
+    const refuse = (message) => (_id, callback) => withCallback(Promise.reject(new Error(message)), callback);
+    // An extension's own blob: addresses can't be read by the page that
+    // downloads; they go over as data: addresses.
+    const readable = async (url) => {
+      if (!/^blob:/i.test(url)) return url;
+      const blob = await (await fetch(url)).blob();
+      if (blob.size > MAX_DATA) throw new Error("The data is too large to download.");
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    };
+    const gesture = () => typeof navigator !== "undefined" && !!(navigator.userActivation && navigator.userActivation.isActive);
+    pin(chromeApi, "downloads", {
+      State: Object.freeze({ IN_PROGRESS: "in_progress", INTERRUPTED: "interrupted", COMPLETE: "complete" }),
+      DangerType: Object.freeze({
+        FILE: "file", URL: "url", CONTENT: "content", UNCOMMON: "uncommon", HOST: "host", UNWANTED: "unwanted",
+        SAFE: "safe", ACCEPTED: "accepted",
+      }),
+      FilenameConflictAction: Object.freeze({ UNIQUIFY: "uniquify", OVERWRITE: "overwrite", PROMPT: "prompt" }),
+      download: (options, callback) =>
+        withCallback(
+          readable(String((options && options.url) || "")).then((url) =>
+            native("downloads.download", { details: Object.assign({}, options, { url }) }),
+          ),
+          callback,
+        ),
+      search: (query, callback) => ask("search", { details: query || {} }, callback),
+      pause: byId("pause"),
+      resume: byId("resume"),
+      cancel: byId("cancel"),
+      erase: (query, callback) =>
+        withCallback(
+          native("downloads.search", { details: query || {} }).then(async (items) => {
+            const erased = [];
+            for (const item of items) {
+              if (item.state === "in_progress") continue;
+              try {
+                await native("downloads.erase", { id: item.id });
+                erased.push(item.id);
+              } catch {}
+            }
+            return erased;
+          }),
+          callback,
+        ),
+      // Chrome opens a download only on a user gesture.
+      open: (id, callback) =>
+        gesture() ? ask("open", { id }, callback) : refuse("User gesture required")(id, callback),
+      show: (id) => void native("downloads.show", { id }).catch(() => {}),
+      removeFile: refuse("Downloaded files are deleted only by the person."),
+      acceptDanger: refuse("Only the person can keep a file held for its type, from the downloads panel."),
+      onCreated: dataEvent("downloads.onCreated"),
+      onChanged: dataEvent("downloads.onChanged"),
+      onErased: dataEvent("downloads.onErased"),
+    });
+  }
+
+  if (!isContent && !chromeApi.topSites && declares("topSites")) {
+    pin(chromeApi, "topSites", { get: (callback) => withCallback(native("topSites.get", {}), callback) });
+  }
+
+  // Chrome's root "0" stands above the browser's top level; there is no
+  // bookmarks bar or other permanent folder.
+  if (!isContent && !chromeApi.bookmarks && declares("bookmarks")) {
+    const ask = (op, fields, callback) => withCallback(native(`bookmarks.${op}`, fields), callback);
+    const event = (name) => dataEvent(`bookmarks.${name}`);
+    pin(chromeApi, "bookmarks", {
+      getTree: (callback) => ask("getTree", {}, callback),
+      getSubTree: (id, callback) => ask("getSubTree", { id }, callback),
+      getChildren: (id, callback) => ask("getChildren", { id }, callback),
+      get: (ids, callback) => ask("get", { ids: [].concat(ids) }, callback),
+      getRecent: (count, callback) => ask("getRecent", { count }, callback),
+      search: (query, callback) => ask("search", { details: query }, callback),
+      create: (bookmark, callback) => ask("create", { details: bookmark || {} }, callback),
+      update: (id, changes, callback) => ask("update", { id, details: changes || {} }, callback),
+      move: (id, destination, callback) => ask("move", { id, details: destination || {} }, callback),
+      remove: (id, callback) => ask("remove", { id }, callback),
+      removeTree: (id, callback) => ask("removeTree", { id }, callback),
+      onCreated: event("onCreated"),
+      onChanged: event("onChanged"),
+      onMoved: event("onMoved"),
+      onRemoved: event("onRemoved"),
+      // The browser keeps no custom order apart from moves, which onMoved reports.
+      onChildrenReordered: makeEvent(),
+      onImportBegan: event("onImportBegan"),
+      onImportEnded: event("onImportEnded"),
     });
   }
 
@@ -1033,6 +1180,19 @@
 
   // Every enabled extension's action is shown in Zephium's toolbar.
   const action = !isContent && namespace("action");
+  // Zephium draws badges in its own toolbar colors; the text color an
+  // extension picks is kept and answered back.
+  if (action && typeof action.setBadgeTextColor !== "function") {
+    const colors = new Map();
+    pin(action, "setBadgeTextColor", (details, callback) => {
+      colors.set((details && details.tabId) ?? null, details && details.color);
+      return withCallback(Promise.resolve(), callback);
+    });
+    pin(action, "getBadgeTextColor", (details, callback) => {
+      const color = colors.get((details && details.tabId) ?? null) ?? colors.get(null) ?? [255, 255, 255, 255];
+      return withCallback(Promise.resolve(Array.isArray(color) ? color : [255, 255, 255, 255]), callback);
+    });
+  }
   if (action && typeof action.getUserSettings !== "function") {
     pin(action, "getUserSettings", (callback) => withCallback(Promise.resolve({ isOnToolbar: true }), callback));
     if (!action.onUserSettingsChanged) pin(action, "onUserSettingsChanged", makeEvent());

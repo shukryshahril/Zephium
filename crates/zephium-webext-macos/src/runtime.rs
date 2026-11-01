@@ -81,6 +81,8 @@ pub(crate) struct Shared {
     pub(crate) events: crate::events::Hub,
     pub(crate) privacy: crate::privacy::Overrides,
     pub(crate) cookies: crate::cookies::Watch,
+    pub(crate) downloads_seen: crate::downloads::Seen,
+    pub(crate) data_interest: std::cell::Cell<zephium_core::extension_data::ExtensionDataInterest>,
     pub(crate) store: Retained<WKWebsiteDataStore>,
     pub(crate) mtm: MainThreadMarker,
 }
@@ -150,6 +152,8 @@ impl Runtime {
             events: Default::default(),
             privacy: Default::default(),
             cookies: Default::default(),
+            downloads_seen: Default::default(),
+            data_interest: Default::default(),
             store: store.retain(),
             mtm,
         });
@@ -311,6 +315,23 @@ impl Runtime {
         done: impl FnOnce(Option<crate::AuthAnswer>) + 'static,
     ) {
         crate::auth::ask(&self.shared, details, Box::new(done));
+    }
+
+    /// The profile's history, bookmarks or closed tabs changed; extensions
+    /// listening with the permission hear it.
+    pub fn data_changed(&self, change: zephium_core::extension_data::ExtensionDataChange) {
+        crate::data::changed(&self.shared, change);
+    }
+
+    /// Whether any extension listens to downloads; only then does the host
+    /// report them through [`Self::downloads_changed`].
+    pub fn hears_downloads(&self) -> bool {
+        self.shared.downloads_seen.listening()
+    }
+
+    /// The profile's downloads now, and those forgotten since the last call.
+    pub fn downloads_changed(&self, items: Vec<crate::DownloadItem>, erased: Vec<u64>) {
+        crate::downloads::changed(&self.shared, items, erased);
     }
 
     /// Runs an extension's toolbar action as a user click on `tab`: WebKit
@@ -773,6 +794,7 @@ fn unload(shared: &Rc<Shared>, controller: &WKWebExtensionController, id: &str) 
     crate::worker_gone(shared, id);
     crate::lifetime::forget(shared, id);
     crate::events::forget(shared, id);
+    crate::data::refresh_interest(shared);
     crate::idle::forget(shared, id);
     crate::privacy::forget(shared, id);
     crate::notifications::forget(shared, id);

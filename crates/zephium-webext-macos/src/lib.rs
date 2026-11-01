@@ -9,11 +9,15 @@
 mod access;
 mod api;
 mod auth;
+mod bookmarks;
 mod bridge;
 pub mod compat;
 mod cookies;
+mod data;
 mod delegate;
+mod downloads;
 mod events;
+mod history;
 mod idle;
 mod json;
 mod lifetime;
@@ -22,8 +26,10 @@ mod notifications;
 mod offscreen;
 mod privacy;
 mod runtime;
+mod sessions;
 mod socket;
 mod surface;
+mod top_sites;
 
 use std::sync::OnceLock;
 
@@ -32,6 +38,7 @@ use objc2_foundation::{NSError, NSLocalizedDescriptionKey, NSMutableDictionary, 
 
 pub use api::BROWSER_PERMISSIONS;
 pub use auth::{AuthAnswer, AuthDetails};
+pub use downloads::{DownloadAnswer, DownloadItem, DownloadRequest};
 pub use runtime::{ExtensionSpec, Grants, LoadedExtension, Runtime};
 
 /// A readable message for any error WebKit reports.
@@ -169,6 +176,36 @@ pub trait Host {
     /// tab (or its default, which every tab without its own follows).
     fn action_changed(&self, extension: &str) {
         let _ = extension;
+    }
+
+    /// Reads or changes the profile's history, bookmarks or closed tabs for
+    /// an extension holding the permission. Answers `Unavailable` unless the
+    /// host keeps such data.
+    fn browser_data(
+        &self,
+        extension: &str,
+        call: zephium_core::extension_data::ExtensionDataCall,
+        done: Box<dyn FnOnce(zephium_core::extension_data::ExtensionDataReply)>,
+    ) {
+        let _ = (extension, call);
+        done(zephium_core::extension_data::ExtensionDataReply::Unavailable);
+    }
+
+    /// Runs a `chrome.downloads` request through the browser's download
+    /// manager. Declines unless the host has one.
+    fn downloads(
+        &self,
+        request: DownloadRequest,
+        done: Box<dyn FnOnce(Result<DownloadAnswer, String>)>,
+    ) {
+        let _ = request;
+        done(Err("Downloads are not available.".into()));
+    }
+
+    /// Which data changes extensions now listen to; the host reports them
+    /// through [`Runtime::data_changed`].
+    fn data_interest(&self, interest: zephium_core::extension_data::ExtensionDataInterest) {
+        let _ = interest;
     }
 }
 

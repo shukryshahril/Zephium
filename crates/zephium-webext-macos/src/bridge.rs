@@ -14,7 +14,7 @@ use objc2_web_kit::{
 use serde_json::Value;
 
 use crate::runtime::Shared;
-use crate::{api, error, idle, json, notifications, offscreen, privacy, LogLevel};
+use crate::{api, data, error, idle, json, notifications, offscreen, privacy, LogLevel};
 
 pub(crate) const APPLICATION: &str = "app.zephium.webext";
 
@@ -91,6 +91,21 @@ pub(crate) fn handle(
         return;
     }
     let id = extension(context);
+    if let Some(api) = message
+        .get("api")
+        .and_then(Value::as_str)
+        .filter(|api| data::handles(api))
+    {
+        let reply = reply.copy();
+        data::request(
+            shared,
+            &id,
+            api,
+            &message,
+            Box::new(move |result| respond(&reply, result)),
+        );
+        return;
+    }
     let gate = |permission: &str| {
         if api::granted(shared, &id, permission) {
             Ok(())

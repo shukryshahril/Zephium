@@ -13,6 +13,9 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSPopoverBehavior, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSRectEdge, NSSize, NSString};
 use objc2_web_kit::{WKWebExtensionAction, WKWebView, WKWebViewConfiguration, WKWebsiteDataStore};
+use zephium_core::extension_data::{
+    ExtensionDataCall, ExtensionDataChange, ExtensionDataInterest, ExtensionDataReply,
+};
 use zephium_core::extensions::{
     ExtensionActionRejection, ExtensionActionRequest, ExtensionActionRevision,
     ExtensionActionScope, ExtensionActionSettlement, ExtensionActionSnapshot,
@@ -25,8 +28,8 @@ use zephium_core::geometry::Rect;
 use zephium_core::ids::{ExtensionInstallId, ItemId, ProfileId, WindowId};
 use zephium_core::ports::engine::{EngineEvent, WebExtensionLoad, WebExtensionLoaded};
 use zephium_webext_macos::{
-    ExtensionSpec, Grants, Host, LogLevel, Runtime, TabRequest, TabRequestDone, TabSnapshot,
-    WindowSnapshot,
+    DownloadRequest, ExtensionSpec, Grants, Host, LogLevel, Runtime, TabRequest, TabRequestDone,
+    TabSnapshot, WindowSnapshot,
 };
 
 use objc2::runtime::ProtocolObject;
@@ -69,6 +72,7 @@ struct ProfileRuntime {
     runtime: Runtime,
     store: Retained<WKWebsiteDataStore>,
     bridge: Rc<Bridge>,
+    downloads: Rc<RefCell<super::webext_downloads::DownloadNumbers>>,
     installs: HashMap<ExtensionInstallId, Install>,
     surface: Option<ExtensionBrowserSurface>,
 }
@@ -98,6 +102,18 @@ struct Install {
 }
 
 impl WebextHost {
+    pub(super) fn downloads_runtime(
+        &self,
+        profile: ProfileId,
+    ) -> Option<(
+        &Runtime,
+        Rc<RefCell<super::webext_downloads::DownloadNumbers>>,
+    )> {
+        self.profiles
+            .get(&profile)
+            .map(|entry| (&entry.runtime, entry.downloads.clone()))
+    }
+
     /// A fresh configuration for one of the profile's tabs, attached to its
     /// runtime. The runtime is created with the profile's first view, so
     /// every tab can run content scripts.
@@ -132,6 +148,7 @@ impl WebextHost {
                 access: RefCell::new(HashMap::new()),
                 auth_enabled: Cell::new(true),
                 auth_extensions: RefCell::new(std::collections::HashSet::new()),
+                data: RefCell::new(HashMap::new()),
             });
             *bridge.self_weak.borrow_mut() = Rc::downgrade(&bridge);
             let runtime = Runtime::new(mtm, &store, Some(&identifier), bridge.clone());
@@ -139,6 +156,7 @@ impl WebextHost {
                 runtime,
                 store,
                 bridge,
+                downloads: Rc::default(),
                 installs: HashMap::new(),
                 surface: None,
             }
@@ -990,9 +1008,13 @@ struct Bridge {
     access: RefCell<HashMap<u64, AccessAnswer>>,
     auth_enabled: Cell<bool>,
     auth_extensions: RefCell<std::collections::HashSet<String>>,
+    data: RefCell<HashMap<u64, DataAnswer>>,
 }
 
 type AccessAnswer = Box<dyn FnOnce(bool)>;
+type DataAnswer = Box<dyn FnOnce(ExtensionDataReply)>;
+/// The shell answers every data request; this bounds one it never could.
+const DATA_TIMEOUT_SECONDS: f64 = 60.0;
 
 impl Bridge {
     fn request(&self, action: ExtensionBrowserRequestAction, done: TabRequestDone) {
@@ -1390,6 +1412,13 @@ impl Bridge {
             done(allowed);
         }
     }
+
+    fn answer_data(&self, request: u64, reply: ExtensionDataReply) {
+        let done = self.data.borrow_mut().remove(&request);
+        if let Some(done) = done {
+            done(reply);
+        }
+    }
 }
 
 impl Host for Bridge {
@@ -1433,6 +1462,68 @@ impl Host for Bridge {
     fn action_changed(&self, _extension: &str) {
         self.sink.emit(EngineEvent::ExtensionActionsInvalidated {
             profile: self.profile,
+        });
+    }
+
+    fn browser_data(&self, _extension: &str, call: ExtensionDataCall, done: DataAnswer) {
+        let number = self.next_request.get();
+        self.next_request.set(number.wrapping_add(1));
+        self.data.borrow_mut().insert(number, done);
+        self.sink
+            .emit(EngineEvent::WebExtensionDataRequested(Box::new(
+                zephium_core::ports::engine::WebExtensionDataRequest {
+                    profile: self.profile,
+                    request: number,
+                    call,
+                },
+            )));
+        let bridge = self.self_weak.borrow().clone();
+        let expire = block2::RcBlock::new(
+            move |_timer: std::ptr::NonNull<objc2_foundation::NSTimer>| {
+                if let Some(bridge) = bridge.upgrade() {
+                    bridge.answer_data(number, ExtensionDataReply::Unavailable);
+                }
+            },
+        );
+        unsafe {
+            objc2_foundation::NSTimer::scheduledTimerWithTimeInterval_repeats_block(
+                DATA_TIMEOUT_SECONDS,
+                false,
+                &expire,
+            )
+        };
+    }
+
+    fn downloads(&self, request: DownloadRequest, done: super::webext_downloads::DownloadDone) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return done(Err("Downloads are not available.".into()));
+        };
+        let profile = self.profile;
+        // The runtime asks from inside its own callbacks; the host answers
+        // once it is free.
+        let bound = dispatch2::MainThreadBound::new((request, done), mtm);
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            let mtm = MainThreadMarker::new().expect("the main queue runs on the main thread");
+            let (request, done) = bound.into_inner(mtm);
+            let slot = Rc::new(RefCell::new(Some(done)));
+            let handed = slot.clone();
+            let admitted = super::try_with(move |host| {
+                if let Some(done) = handed.borrow_mut().take() {
+                    host.extension_downloads(profile, request, done);
+                }
+            });
+            if !admitted {
+                if let Some(done) = slot.borrow_mut().take() {
+                    done(Err("Downloads are not available right now.".into()));
+                }
+            }
+        });
+    }
+
+    fn data_interest(&self, interest: ExtensionDataInterest) {
+        self.sink.emit(EngineEvent::WebExtensionDataInterest {
+            profile: self.profile,
+            interest,
         });
     }
 
@@ -1745,6 +1836,27 @@ impl super::EngineHost {
     pub(crate) fn remove_web_extension(&mut self, profile: ProfileId, load: WebExtensionLoad) {
         let sink = self.sink.clone();
         self.webext.remove(profile, load, &sink);
+    }
+
+    pub(crate) fn answer_web_extension_data(
+        &mut self,
+        profile: ProfileId,
+        request: u64,
+        reply: ExtensionDataReply,
+    ) {
+        if let Some(entry) = self.webext.profiles.get(&profile) {
+            entry.bridge.answer_data(request, reply);
+        }
+    }
+
+    pub(crate) fn web_extension_data_changed(
+        &mut self,
+        profile: ProfileId,
+        change: ExtensionDataChange,
+    ) {
+        if let Some(entry) = self.webext.profiles.get(&profile) {
+            entry.runtime.data_changed(change);
+        }
     }
 }
 

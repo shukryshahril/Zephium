@@ -128,6 +128,7 @@ pub(crate) fn connect(
         if let Some(shared) = weak.upgrade() {
             drop_port(&shared, key);
             crate::cookies::refresh(&shared);
+            crate::data::refresh_interest(&shared);
         }
     });
     unsafe {
@@ -183,6 +184,7 @@ fn receive(shared: &Rc<Shared>, key: usize, message: Value) {
                 pump(shared, &port.extension);
             }
             crate::cookies::refresh(shared);
+            crate::data::refresh_interest(shared);
         }
         Some("ack") => {
             let Some(seq) = message.get("seq").and_then(Value::as_u64) else {

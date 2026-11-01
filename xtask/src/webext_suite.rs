@@ -294,11 +294,8 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
     results.generated = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    // A failed baseline run keeps the last good figures to compare against.
-    if let Some(baseline) = baseline.first().filter(|baseline| {
-        baseline.problems.is_empty() && baseline.resources.footprint_mb.is_some()
-    }) {
-        results.baseline = Some(baseline.resources.clone());
+    if let Some(resources) = baseline.first().and_then(accepted_baseline) {
+        results.baseline = Some(resources.clone());
     }
     results.extensions.extend(records);
     results.save(&results_path)?;
@@ -306,6 +303,14 @@ pub(crate) fn run(arguments: &[String]) -> Result<(), String> {
         return Err(format!("{failed} extensions regressed"));
     }
     Ok(())
+}
+
+/// The figures a baseline run may save. A run that failed or measured no
+/// footprint keeps the last good figures to compare against; its idle CPU
+/// is kept as measured, missing or not.
+fn accepted_baseline(outcome: &Outcome) -> Option<&Resources> {
+    (outcome.problems.is_empty() && outcome.resources.footprint_mb.is_some())
+        .then_some(&outcome.resources)
 }
 
 fn figures(resources: &Resources, duration: Duration) -> String {
@@ -816,6 +821,30 @@ fn excerpt(text: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_finished_baseline_with_a_footprint_is_saved() {
+        let outcome = |problems: Vec<String>, footprint_mb: Option<f64>| Outcome {
+            name: String::new(),
+            id: String::new(),
+            known: None,
+            problems,
+            resources: Resources {
+                footprint_mb,
+                ..Resources::default()
+            },
+            duration: Duration::ZERO,
+        };
+        let finished = outcome(Vec::new(), Some(40.0));
+        let saved = accepted_baseline(&finished).expect("a finished run is saved");
+        assert_eq!(saved.idle_cpu_s, None);
+        assert!(accepted_baseline(&outcome(
+            vec!["baseline did not finish in time".into()],
+            Some(40.0)
+        ))
+        .is_none());
+        assert!(accepted_baseline(&outcome(Vec::new(), None)).is_none());
+    }
 
     fn expectation(popup: bool, allow: &[&str]) -> Expectation {
         Expectation {

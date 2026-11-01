@@ -551,15 +551,7 @@ impl WebextHost {
             identifier.as_str(),
             "_execute_action" | "_execute_browser_action" | "_execute_page_action"
         ) {
-            // Private windows run no extensions, as the snapshot WebKit gets
-            // leaves them out; a shortcut pressed there does nothing.
-            let focused = surface.focused();
-            if let Some(tab) = surface
-                .windows()
-                .iter()
-                .find(|w| Some(w.id()) == focused && !w.is_private())
-                .and_then(|w| w.active())
-            {
+            if let Some(tab) = shortcut_tab(surface.windows(), surface.focused()) {
                 entry
                     .bridge
                     .sink
@@ -788,6 +780,19 @@ impl WebextHost {
         }
         true
     }
+}
+
+/// The tab a toolbar shortcut acts on: the focused window's active one.
+/// Private windows run no extensions, as the snapshot WebKit gets leaves them
+/// out, so a shortcut pressed there does nothing.
+fn shortcut_tab(
+    windows: &[zephium_core::extensions::ExtensionBrowserWindow],
+    focused: Option<WindowId>,
+) -> Option<ItemId> {
+    windows
+        .iter()
+        .find(|window| Some(window.id()) == focused && !window.is_private())
+        .and_then(|window| window.active())
 }
 
 /// Chrome's `contextMenus.ACTION_MENU_TOP_LEVEL_LIMIT`.
@@ -2031,6 +2036,32 @@ impl PageDelegate {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_action_shortcut_acts_on_the_focused_window_unless_it_is_private() {
+        use zephium_core::extensions::{ExtensionBrowserTab, ExtensionBrowserWindow};
+        let window = |id: WindowId, private: bool, tab: u128| {
+            let item = ItemId::from(tab);
+            let tab = ExtensionBrowserTab::from_snapshot(
+                None,
+                item,
+                true,
+                "Example",
+                Some(&url::Url::parse("https://example.test/").unwrap()),
+                false,
+                false,
+            )
+            .unwrap();
+            ExtensionBrowserWindow::new(id, private, Some(item), vec![tab]).unwrap()
+        };
+        let windows = [window(1, false, 10), window(2, true, 20)];
+        assert_eq!(
+            super::shortcut_tab(&windows, Some(1)),
+            Some(ItemId::from(10))
+        );
+        assert_eq!(super::shortcut_tab(&windows, Some(2)), None);
+        assert_eq!(super::shortcut_tab(&windows, None), None);
+    }
+
     use super::*;
 
     const AUTH_EXTENSION: &str = "abcdefghijklmnopabcdefghijklmnop";

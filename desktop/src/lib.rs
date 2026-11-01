@@ -262,8 +262,11 @@ const PRE_SHELL_CLEANUP_TIMEOUT: std::time::Duration = std::time::Duration::from
 
 const PRIVILEGED_PERMISSIONS_POLICY: &str = "accelerometer=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(self), compute-pressure=(), display-capture=(), document-domain=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), idle-detection=(), join-ad-interest-group=(), local-fonts=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), speaker-selection=(), storage-access=(), sync-xhr=(), unload=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()";
 const PRIVILEGED_BOOTSTRAP_URL: &str = "about:blank";
+// The chrome and launcher load their own pages, so a warm spare renderer
+// waiting for another site would mostly sit in memory.
 #[cfg(any(target_os = "windows", test))]
-const PRIVILEGED_WEBVIEW2_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI";
+const PRIVILEGED_WEBVIEW2_BROWSER_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,SpareRendererForSitePerProcess";
 
 #[derive(Clone)]
 struct ShutdownCoordinator {
@@ -1762,6 +1765,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             webext::web_extension_cancel,
             webext::web_extension_list,
             webext::web_extension_set_enabled,
+            webext::web_extension_set_pinned,
             webext::web_extension_retry,
             webext::web_extension_uninstall,
             webext::web_extension_answer_access,
@@ -1770,7 +1774,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             webext::web_extension_choose_file,
             webext::web_extension_prepare_file,
             webext::web_extension_review_update,
-            webext::web_extension_catalog_icon,
             browser_credentials::browser_credential_capability,
             browser_credentials::browser_passkey_authorization_request,
             page_permission_respond,
@@ -6653,8 +6656,8 @@ pub fn run() {
                 .background_color(tauri::utils::config::Color(0, 0, 0, 0))
                 .data_directory(privileged_runtime.main.clone())
                 // Supplying any explicit value replaces Wry's default, which
-                // also disables msSmartScreenProtection. Keep only the two
-                // browser-UI suppressions for privileged chrome.
+                // also disables msSmartScreenProtection. Keep only the
+                // feature suppressions privileged chrome needs.
                 .additional_browser_args(PRIVILEGED_WEBVIEW2_BROWSER_ARGS);
             #[cfg(not(all(unix, not(target_os = "macos"))))]
             let main_builder = main_builder.on_download(|_, _| false);
@@ -7306,6 +7309,8 @@ pub fn run() {
                             .is_minimized()
                             .unwrap_or(size.width == 0 || size.height == 0);
                         resize_shell.dispatch(Command::SetWindowVisible(!minimized));
+                        #[cfg(target_os = "windows")]
+                        platform::imp::set_chrome_minimized(&resize_window, minimized);
                         if minimized {
                             return;
                         }
@@ -7332,6 +7337,8 @@ pub fn run() {
                     {
                         let minimized = resize_window.is_minimized().unwrap_or(false);
                         resize_shell.dispatch(Command::SetWindowVisible(!minimized));
+                        #[cfg(target_os = "windows")]
+                        platform::imp::set_chrome_minimized(&resize_window, minimized);
                         if !minimized {
                             // Re-read logical content size at the new scale.
                             // The layout refresh also rebuilds Windows
@@ -7407,6 +7414,8 @@ pub fn run() {
                         // resize notification. Wake content before it can be
                         // interacted with.
                         resize_shell.dispatch(Command::SetWindowVisible(true));
+                        #[cfg(target_os = "windows")]
+                        platform::imp::set_chrome_minimized(&resize_window, false);
                         presence::report_app_active(resize_window.app_handle());
                     }
                     // Losing focus alone does not make a browser tab
@@ -7417,6 +7426,8 @@ pub fn run() {
                         voice::window_blurred(resize_window.app_handle());
                         if resize_window.is_minimized().unwrap_or(false) {
                             resize_shell.dispatch(Command::SetWindowVisible(false));
+                            #[cfg(target_os = "windows")]
+                            platform::imp::set_chrome_minimized(&resize_window, true);
                         }
                         presence::report_app_active(resize_window.app_handle());
                     }
@@ -9210,7 +9221,7 @@ mod tests {
     fn privileged_webview2_args_keep_smartscreen_and_process_sandboxes_enabled() {
         assert_eq!(
             super::PRIVILEGED_WEBVIEW2_BROWSER_ARGS,
-            "--disable-features=msWebOOUI,msPdfOOUI"
+            "--disable-features=msWebOOUI,msPdfOOUI,SpareRendererForSitePerProcess"
         );
         let args = super::PRIVILEGED_WEBVIEW2_BROWSER_ARGS.to_ascii_lowercase();
         assert!(!args.contains("smartscreen"));

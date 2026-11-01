@@ -2154,8 +2154,11 @@ impl EngineHost {
             &crate::platform::imp::native_webview(&view),
             partition.profile(),
         );
+        // Private windows run no extensions, so their pages carry no button.
         #[cfg(target_os = "macos")]
-        let store_button = {
+        let store_button = if matches!(partition, Partition::Ephemeral(_)) {
+            super::store_button::StoreButtonSlot::default()
+        } else {
             let tab = id.clone();
             super::store_button::StoreButtonSlot::native(
                 crate::platform::macos::store_button::StoreButton::install(

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Memory growth below this is noise, whatever its share.
 const MIN_GROWTH_MB: f64 = 10.0;
 const MAX_GROWTH: f64 = 1.25;
+const MIN_BUSY_GROWTH_MS: f64 = 40.0;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -38,6 +39,13 @@ pub(super) struct Resources {
     pub(super) idle_cpu_s: Option<f64>,
     #[serde(default)]
     pub(super) processes: usize,
+    /// Least main-thread time an ordinary page lost in its first 1.5 s,
+    /// over a few loads.
+    #[serde(default)]
+    pub(super) busy_ms: Option<f64>,
+    /// Memory gained over many page loads and closes, with `--soak`.
+    #[serde(default)]
+    pub(super) soak_mb: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -96,6 +104,11 @@ impl Results {
                     ));
                 }
             }
+            if let (Some(was), Some(is)) = (before.resources.busy_ms, record.resources.busy_ms) {
+                if is > was * MAX_GROWTH && is - was > MIN_BUSY_GROWTH_MS {
+                    found.push(format!("{name}: page busy {was:.0} ms -> {is:.0} ms"));
+                }
+            }
         }
         found
     }
@@ -115,6 +128,8 @@ mod tests {
                 footprint_mb: Some(rss_mb),
                 idle_cpu_s: Some(0.1),
                 processes: 3,
+                busy_ms: None,
+                soak_mb: None,
             },
             duration_s: 30.0,
         }

@@ -121,13 +121,21 @@ pub(crate) fn create(
             }
             return Ok(key);
         }
-        let mine = center
+        // Banners that time out into Notification Center are never reported
+        // back, so at the cap the extension's oldest one makes room.
+        let mut mine: Vec<(u64, String)> = center
             .shown
-            .values()
-            .filter(|shown| shown.extension == extension)
-            .count();
-        if mine >= MAX_PER_EXTENSION {
-            return Err("Too many notifications are showing.".into());
+            .iter()
+            .filter(|(_, shown)| shown.extension == extension)
+            .filter_map(|(key, _)| Some((key.strip_prefix(PREFIX)?.parse().ok()?, key.clone())))
+            .collect();
+        if mine.len() >= MAX_PER_EXTENSION {
+            mine.sort_unstable();
+            let oldest: Vec<String> = mine.into_iter().take(1).map(|(_, key)| key).collect();
+            for key in &oldest {
+                center.shown.remove(key);
+            }
+            withdraw(&oldest);
         }
         let number = center.next.get() + 1;
         center.next.set(number);

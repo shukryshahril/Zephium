@@ -107,6 +107,9 @@ struct Entry {
     /// the store, so a developer's own build stays as it is.
     #[serde(default)]
     sideloaded: bool,
+    /// Its button sits in the address field rather than in the tray.
+    #[serde(default)]
+    pinned: bool,
 }
 
 #[derive(Clone, Debug, Serialize, specta::Type)]
@@ -149,6 +152,7 @@ pub(crate) struct WebExtensionView {
     has_options: bool,
     held_update: Option<String>,
     sideloaded: bool,
+    pinned: bool,
 }
 
 impl WebExtensions {
@@ -302,21 +306,6 @@ fn take_pending_for_publication<'a>(
     let slot = PublicationSlot::acquire(jobs)?;
     let pending = imp::take_pending(extensions, id, review_id)?;
     Ok((slot, pending))
-}
-
-/// A recommended extension's icon as a data URL, or `None` while the store
-/// can't be reached.
-#[tauri::command]
-#[specta::specta]
-pub(crate) async fn web_extension_catalog_icon(
-    caller: WebviewWindow,
-    extensions: State<'_, WebExtensions>,
-    token: String,
-) -> Result<Option<String>, String> {
-    if !authorize(&caller, CallerPolicy::Main, "web_extension_catalog_icon") {
-        return Err(UNAVAILABLE.into());
-    }
-    Ok(store_icon::icon(&extensions.root, &token).await)
 }
 
 /// Downloads and verifies the extension on the active store page, and
@@ -518,6 +507,28 @@ pub(crate) async fn web_extension_set_enabled(
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (shell, extensions, id, enabled);
+        Err(UNAVAILABLE.into())
+    }
+}
+
+/// Puts the extension's button in the address field, or back in the tray.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn web_extension_set_pinned(
+    caller: WebviewWindow,
+    shell: State<'_, Handle>,
+    extensions: State<'_, WebExtensions>,
+    id: String,
+    pinned: bool,
+) -> Result<(), String> {
+    if !authorize(&caller, CallerPolicy::Main, "web_extension_set_pinned") {
+        return Err(UNAVAILABLE.into());
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    return imp::set_pinned(&shell, &extensions, &id, pinned).await;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (shell, extensions, id, pinned);
         Err(UNAVAILABLE.into())
     }
 }
@@ -756,7 +767,6 @@ pub(crate) fn dropped_package(paths: &[PathBuf]) -> Option<String> {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod imp;
-mod store_icon;
 
 #[cfg(all(test, unix))]
 mod tests {

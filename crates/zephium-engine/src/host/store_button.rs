@@ -27,6 +27,10 @@ pub(super) struct StoreButtonSlot {
     native: Option<crate::platform::macos::store_button::StoreButton>,
     #[cfg(target_os = "windows")]
     poll: Option<crate::platform::imp::ContentPolicyTimeout>,
+    // Polling stopped because the listing went out of view, and starts again
+    // when it comes back.
+    #[cfg(target_os = "windows")]
+    paused: bool,
 }
 
 impl StoreButtonSlot {
@@ -99,6 +103,7 @@ impl EngineHost {
             for (other, view) in &mut self.views {
                 if *other != id {
                     view.store_button.poll = None;
+                    view.store_button.paused = false;
                 }
             }
             self.schedule_store_button_poll(id);
@@ -167,13 +172,31 @@ impl EngineHost {
     /// bridge to the browser, so the listing in front is asked for clicks.
     #[cfg(target_os = "windows")]
     fn schedule_store_button_poll(&mut self, id: ItemId) {
+        let hidden = self.hidden.contains(&id);
         let Some(view) = self.views.get_mut(&id) else {
             return;
         };
+        // A listing out of view cannot be clicked.
+        view.store_button.paused = hidden;
+        if hidden {
+            view.store_button.poll = None;
+            return;
+        }
         view.store_button.poll =
             crate::platform::imp::schedule_browser_timeout(POLL_INTERVAL, move || {
                 let _ = super::try_with(move |host| host.poll_store_button(id));
             });
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn resume_store_button_poll(&mut self, id: ItemId) {
+        if self
+            .views
+            .get(&id)
+            .is_some_and(|view| view.store_button.paused && view.store_button.shown.is_some())
+        {
+            self.schedule_store_button_poll(id);
+        }
     }
 
     #[cfg(target_os = "windows")]

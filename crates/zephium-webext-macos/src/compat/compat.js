@@ -415,7 +415,16 @@
     const browserPart = {
       contains: (names, ok) =>
         ok && names.length ? browserState().then((state) => names.every((name) => state.granted.includes(name))) : ok,
-      request: (names, ok) => (ok && names.length ? native("permissions.request", { permissions: names }) : ok),
+      // As in Chrome, a page asks during a click; a worker asks from the
+      // events a click brings it.
+      request: (names, ok) => {
+        if (!ok || !names.length) return ok;
+        const activation = !isWorker && g.navigator && g.navigator.userActivation;
+        if (activation && !activation.isActive) {
+          return Promise.reject(new Error("This function must be called during a user gesture"));
+        }
+        return native("permissions.request", { permissions: names });
+      },
       remove: (names, ok) => (names.length ? native("permissions.remove", { permissions: names }).then((done) => ok && done) : ok),
     };
     const guard = (method, withUnknown) => {
@@ -1233,6 +1242,18 @@
       const type = info && info.windowType;
       if (type !== undefined && type !== "normal" && type !== "popup") return withCallback(Promise.resolve([]), callback);
       return query.apply(this, arguments);
+    });
+  }
+
+  // Chrome's popup is in no tab; WebKit answers with the tab under it, and
+  // popups that size themselves (Proton Pass) then fill a tab's width.
+  if (tabsApi && typeof tabsApi.getCurrent === "function") {
+    const getCurrent = tabsApi.getCurrent;
+    const extension = namespace("extension");
+    pin(tabsApi, "getCurrent", function (callback) {
+      const views = extension && typeof extension.getViews === "function" ? extension.getViews({ type: "popup" }) : [];
+      if (views.includes(globalThis)) return withCallback(Promise.resolve(undefined), callback);
+      return getCurrent.apply(this, arguments);
     });
   }
 

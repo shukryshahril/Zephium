@@ -324,6 +324,8 @@ export const commands = {
 	webExtensionCancel: (reviewId: string) => __TAURI_INVOKE<void>("web_extension_cancel", { reviewId }),
 	webExtensionList: () => typedError<WebExtensionView[], string>(__TAURI_INVOKE("web_extension_list")),
 	webExtensionSetEnabled: (id: string, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("web_extension_set_enabled", { id, enabled })),
+	/**  Puts the extension's button in the address field, or back in the tray. */
+	webExtensionSetPinned: (id: string, pinned: boolean) => typedError<null, string>(__TAURI_INVOKE("web_extension_set_pinned", { id, pinned })),
 	/**  Retries only the exact installation displayed in the Extensions page. */
 	webExtensionRetry: (profileId: string, installId: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_retry", { profileId, installId })),
 	webExtensionUninstall: (id: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_uninstall", { id })),
@@ -365,11 +367,6 @@ export const commands = {
 	 *  the user's approval.
 	 */
 	webExtensionReviewUpdate: (id: string) => typedError<WebExtensionReview, string>(__TAURI_INVOKE("web_extension_review_update", { id })),
-	/**
-	 *  A recommended extension's icon as a data URL, or `None` while the store
-	 *  can't be reached.
-	 */
-	webExtensionCatalogIcon: (token: string) => typedError<string | null, string>(__TAURI_INVOKE("web_extension_catalog_icon", { token })),
 	/**
 	 *  Reads only platform capability state. It never enumerates credentials,
 	 *  relying parties, or extension-owned vault data and never opens native UI.
@@ -3560,6 +3557,7 @@ export type WebExtensionView = {
 	has_options: boolean,
 	held_update: string | null,
 	sideloaded: boolean,
+	pinned: boolean,
 };
 
 /**

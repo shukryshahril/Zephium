@@ -1,4 +1,5 @@
 mod log;
+mod popover_close;
 mod sidebar_edge;
 mod sidebar_resize;
 mod swipe;
@@ -637,6 +638,7 @@ pub fn sidebar_hidden(window: &WebviewWindow, hidden: bool) {
             }
         });
         sidebar_edge::watch(&owner, hidden);
+        popover_close::watch(&owner, hidden);
         super::window_controls::set_in_card(&owner, false);
         super::window_controls::set_tucked(&owner, hidden);
     });

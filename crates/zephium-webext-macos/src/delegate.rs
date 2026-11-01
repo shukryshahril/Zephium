@@ -204,7 +204,10 @@ define_class!(
                 .iter()
                 .filter_map(|url| url.absoluteString().map(|url| url.to_string()))
                 .collect();
+            let extension = unsafe { _context.uniqueIdentifier() }.to_string();
             for url in &urls {
+                let weak = Rc::downgrade(&shared);
+                let extension = extension.clone();
                 shared.host().tab_request(
                     TabRequest::Create {
                         window: None,
@@ -213,7 +216,15 @@ define_class!(
                         pinned: false,
                         index: None,
                     },
-                    Box::new(|_| {}),
+                    Box::new(move |created| {
+                        if let (Ok(Some(tab)), Some(shared)) = (created, weak.upgrade()) {
+                            let mut popouts = shared.popouts.borrow_mut();
+                            let owned = popouts.entry(extension).or_default();
+                            owned.push(tab);
+                            let excess = owned.len().saturating_sub(32);
+                            owned.drain(..excess);
+                        }
+                    }),
                 );
             }
             let window = shared.graph.borrow().focused_window();

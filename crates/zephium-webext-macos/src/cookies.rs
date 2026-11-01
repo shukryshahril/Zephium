@@ -25,7 +25,7 @@ use crate::runtime::Shared;
 
 pub(crate) const EVENT: &str = "cookies.onChanged";
 /// Pages set cookies in bursts; one comparison covers a burst.
-const SETTLE_SECONDS: f64 = 0.3;
+const SETTLE_SECONDS: f64 = 1.5;
 const MAX_COOKIES: usize = 20_000;
 
 type Key = (String, String, String);

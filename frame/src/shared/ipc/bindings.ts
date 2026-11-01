@@ -308,11 +308,18 @@ export const commands = {
 	 */
 	chromeMenuPopup: (x: number | null, y: number | null, page: boolean, canSplit: boolean) => __TAURI_INVOKE<boolean>("chrome_menu_popup", { x, y, page, canSplit }),
 	extensionActionInvoke: (profileId: string, installId: string, runtimeGeneration: string, actionRevision: string, anchorX: number | null, anchorY: number | null, anchorWidth: number | null, anchorHeight: number | null) => __TAURI_INVOKE<OperationAdmission>("extension_action_invoke", { profileId, installId, runtimeGeneration, actionRevision, anchorX, anchorY, anchorWidth, anchorHeight }),
+	/**  The context menu of an extension's toolbar button, under the button. */
+	extensionActionMenu: (profileId: string, installId: string, runtimeGeneration: string, actionRevision: string, anchorX: number | null, anchorY: number | null, anchorWidth: number | null, anchorHeight: number | null) => __TAURI_INVOKE<OperationAdmission>("extension_action_menu", { profileId, installId, runtimeGeneration, actionRevision, anchorX, anchorY, anchorWidth, anchorHeight }),
 	/**
 	 *  Downloads and verifies the extension on the active store page, and
 	 *  returns what the user is asked to approve.
 	 */
 	webExtensionPrepare: (tabId: string) => typedError<WebExtensionReview, string>(__TAURI_INVOKE("web_extension_prepare", { tabId })),
+	/**
+	 *  What the install button on the Web Store listing in `tab_id` shows. A
+	 *  click on it arrives as `zephium:web-extension-store-click`.
+	 */
+	webExtensionStoreButton: (tabId: string, extensionId: string, state: WebExtensionStoreButtonState, label: string) => __TAURI_INVOKE<boolean>("web_extension_store_button", { tabId, extensionId, state, label }),
 	webExtensionConfirm: (id: string, reviewId: string) => typedError<null, string>(__TAURI_INVOKE("web_extension_confirm", { id, reviewId })),
 	webExtensionCancel: (reviewId: string) => __TAURI_INVOKE<void>("web_extension_cancel", { reviewId }),
 	webExtensionList: () => typedError<WebExtensionView[], string>(__TAURI_INVOKE("web_extension_list")),
@@ -344,6 +351,8 @@ export const commands = {
 	version: string,
 	description: string,
 	warnings: string[],
+	/**  What this browser can't do for the extension, apart from its access. */
+	limitations: string[],
 	icon: string | null,
 	update: boolean,
 	/**  Installed from a file, so not checked against the Web Store. */
@@ -703,6 +712,7 @@ export const events = {
 	tabChanged: makeEvent<TabChanged>("tab-changed"),
 	uiCommand: makeEvent<UiCommand>("ui-command"),
 	webExtensionAccessRequested: makeEvent<WebExtensionAccessRequested>("web-extension-access-requested"),
+	webExtensionStoreClicked: makeEvent<WebExtensionStoreClicked>("web-extension-store-clicked"),
 	workChanged: makeEvent<WorkChanged>("work-changed"),
 	workEnvironmentChanged: makeEvent<WorkEnvironmentChanged>("work-environment-changed"),
 	zephiumAccountChanged: makeEvent<AccountChanged>("zephium:account-changed"),
@@ -3507,11 +3517,26 @@ export type WebExtensionReview = {
 	version: string,
 	description: string,
 	warnings: string[],
+	/**  What this browser can't do for the extension, apart from its access. */
+	limitations: string[],
 	icon: string | null,
 	update: boolean,
 	/**  Installed from a file, so not checked against the Web Store. */
 	from_file: boolean,
 };
+
+export type WebExtensionStoreButtonState = "add" | "adding" | "remove";
+
+/**
+ *  A person clicked the install button the browser showed on the Web Store
+ *  listing in `tab_id`, which is still the active tab of the focused window.
+ */
+export type WebExtensionStoreClickView = {
+	tab_id: string,
+	extension_id: string,
+};
+
+export type WebExtensionStoreClicked = WebExtensionStoreClickView;
 
 export type WebExtensionView = {
 	profile_id: string,
@@ -3526,6 +3551,7 @@ export type WebExtensionView = {
 	state: string,
 	error: string | null,
 	warnings: string[],
+	limitations: string[],
 	/**  `all`, `click` or `sites`; meaningful only when `site_scoped`. */
 	access: string,
 	sites: string[],

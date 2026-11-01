@@ -164,6 +164,18 @@ compile_error!("the native agentic semantic probe is forbidden in optimized buil
 
 #[cfg(target_os = "macos")]
 pub use platform::macos::private_api::missing as missing_private_webkit_api;
+
+/// Runs the extension command a key press in the browser window is the
+/// shortcut of; true when one took it. Call it for keys no browser shortcut
+/// claimed, before the page sees them. Unmodified keys return at once.
+#[cfg(target_os = "macos")]
+pub fn perform_extension_command(event: &objc2_app_kit::NSEvent) -> bool {
+    use objc2_app_kit::NSEventModifierFlags as Flags;
+    event
+        .modifierFlags()
+        .intersects(Flags::Command | Flags::Control | Flags::Option)
+        && host::try_perform_extension_command(event)
+}
 #[cfg(target_os = "macos")]
 pub use platform::macos::{
     passkey_authorization_state as macos_passkey_authorization_state,
@@ -1108,7 +1120,8 @@ impl RetirementGate {
             event @ EngineEvent::ExtensionBrowserRequested { .. }
             | event @ EngineEvent::ExtensionPageClosed { .. }
             | event @ EngineEvent::PermissionRequested { .. }
-            | event @ EngineEvent::WebExtensionAccessRequested(_) => Some(event),
+            | event @ EngineEvent::WebExtensionAccessRequested(_)
+            | event @ EngineEvent::WebExtensionAccessRemoved(_) => Some(event),
             EngineEvent::WebExtensionSettled {
                 profile,
                 install,
@@ -1172,6 +1185,7 @@ impl RetirementGate {
             | event @ EngineEvent::Captured { id, .. }
             | event @ EngineEvent::HtmlExtracted { id, .. }
             | event @ EngineEvent::FindResult { id, .. }
+            | event @ EngineEvent::StoreButtonClicked { id, .. }
             | event @ EngineEvent::ShortcutPressed { item: id, .. } => item_token
                 .as_ref()
                 .is_some_and(|active| self.allows_item_token(id, active))
@@ -3195,6 +3209,13 @@ impl Engine for WebviewEngine {
 
     fn capture(&self, _id: ItemId) -> NativeDispatch {
         NativeDispatch::Unsupported
+    }
+
+    fn show_store_button(&self, id: ItemId, button: zephium_core::ports::engine::StoreButton) {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        let _ = self.run_for_active_item(id, move |h| h.show_store_button(id, button));
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let _ = (id, button);
     }
 
     fn extract_html(&self, id: ItemId) -> NativeDispatch {

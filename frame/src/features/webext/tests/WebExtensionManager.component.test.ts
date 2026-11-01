@@ -25,6 +25,7 @@ const extension: WebExtensionView = {
   state: "starting",
   error: null,
   warnings: [],
+  limitations: [],
   access: "all",
   sites: [],
   site_scoped: false,

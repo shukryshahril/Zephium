@@ -289,6 +289,17 @@ impl Shell {
                 install,
                 result,
             } => self.on_web_extension_settled(profile, install, result),
+            EngineEvent::WebExtensionAccessRemoved(removal) => {
+                let removal = *removal;
+                (self.emit)(Projection::WebExtensionAccessRemoved(
+                    zephium_ipc::WebExtensionAccessRemovalView {
+                        profile_id: removal.profile.to_string(),
+                        extension_id: removal.extension_id,
+                        permissions: removal.permissions,
+                        patterns: removal.patterns,
+                    },
+                ));
+            }
             EngineEvent::WebExtensionAccessRequested(request) => {
                 let request = *request;
                 (self.emit)(Projection::WebExtensionAccessRequest(
@@ -587,6 +598,9 @@ impl Shell {
                 request,
                 entries,
             } => self.on_history_entries(id, request, entries),
+            EngineEvent::StoreButtonClicked { id, extension } => {
+                self.store_button_clicked(id, extension);
+            }
             EngineEvent::FindResult {
                 id,
                 query,
@@ -709,7 +723,7 @@ impl Shell {
         }
     }
 
-    fn sync_extension_browser_surface_metadata(&mut self, id: ItemId) {
+    pub(super) fn sync_extension_browser_surface_metadata(&mut self, id: ItemId) {
         let Some(profile) = self.profile_of_item(id) else {
             return;
         };
@@ -749,6 +763,7 @@ impl Shell {
             EngineEvent::ExtensionActionsInvalidated { profile } => Some(*profile),
             EngineEvent::WebExtensionSettled { profile, .. } => Some(*profile),
             EngineEvent::WebExtensionAccessRequested(request) => Some(request.profile),
+            EngineEvent::WebExtensionAccessRemoved(removal) => Some(removal.profile),
             EngineEvent::ExtensionActionShortcutRequested { runtime, .. } => {
                 Some(runtime.profile())
             }
@@ -786,7 +801,8 @@ impl Shell {
             | EngineEvent::Captured { id, .. }
             | EngineEvent::HtmlExtracted { id, .. }
             | EngineEvent::HistoryEntries { id, .. }
-            | EngineEvent::FindResult { id, .. } => self.profile_of_item(*id),
+            | EngineEvent::FindResult { id, .. }
+            | EngineEvent::StoreButtonClicked { id, .. } => self.profile_of_item(*id),
             EngineEvent::MediaCaptureChanged { id, .. }
             | EngineEvent::AudioChanged { id, .. }
             | EngineEvent::MediaChanged { id, .. }

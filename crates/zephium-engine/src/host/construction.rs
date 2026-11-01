@@ -2152,7 +2152,22 @@ impl EngineHost {
         #[cfg(target_os = "macos")]
         crate::platform::macos::autofill::show_key_in_sign_in_fields(
             &crate::platform::imp::native_webview(&view),
+            partition.profile(),
         );
+        #[cfg(target_os = "macos")]
+        let store_button = {
+            let tab = id.clone();
+            super::store_button::StoreButtonSlot::native(
+                crate::platform::macos::store_button::StoreButton::install(
+                    &crate::platform::imp::native_webview(&view),
+                    move |message| {
+                        let tab = tab.get();
+                        let _ =
+                            super::try_with(move |host| host.store_button_message(tab, message));
+                    },
+                ),
+            )
+        };
         #[cfg(target_os = "windows")]
         let request_witness = crate::platform::imp::RequestWitness::install(
             wry::WebViewExtWindows::webview(&view),
@@ -2595,6 +2610,10 @@ impl EngineHost {
             #[cfg(target_os = "windows")]
             native_terminal_failure: self.native_terminal_failure.clone(),
             find: None,
+            #[cfg(target_os = "macos")]
+            store_button,
+            #[cfg(target_os = "windows")]
+            store_button: Default::default(),
             #[cfg(all(
                 feature = "agentic-browser",
                 any(target_os = "macos", target_os = "windows")

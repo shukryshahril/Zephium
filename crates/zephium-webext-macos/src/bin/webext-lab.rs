@@ -9,9 +9,12 @@
 //! - `{"background": true}` starts the last loaded extension's background
 //! - `{"tab": "<url>"}` opens a tab and waits for it to load
 //! - `{"page": "<path>"}` opens one of the extension's pages in a probe view
-//! - `{"eval": "<async function body>", "in": "page" | "tab", "timeout": 5000}`
+//! - `{"eval": "<async function body>", "in": "page" | "tab", "timeout": 5000,
+//!   "as": "<label>"}` prints `RESULT <label> <value>` when labelled
 //! - `{"keys": "<text>", "in": "tab" | "page"}` types real key presses
-//! - `{"sleep": <ms>}`
+//! - `{"sleep": <ms>}`; `{"mark": "<name>"}` prints `MARK <name>`
+//! - `{"close": "tabs" | "popup"}` closes every tab but the first, or the popup
+//! - `{"auth": "<url>"}` offers a sign-in challenge for `url` to extensions
 //! - `{"unload": true}` unloads the last loaded extension; `{"erase": true}`
 //!   unloads it and erases its stored data
 //!
@@ -272,6 +275,10 @@ impl Lab {
                             .get("reviewed_native_app")
                             .and_then(Value::as_bool)
                             .unwrap_or(false),
+                        native_messaging_grantable: step
+                            .get("grantable_native_app")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
                         inspectable: true,
                     };
                     this.runtime.load(spec, move |result| {
@@ -314,6 +321,30 @@ impl Lab {
                 println!("BACKGROUND {result:?}");
                 next();
             });
+        } else if let Some(url) = step.get("auth").and_then(Value::as_str) {
+            let host = url
+                .split("://")
+                .nth(1)
+                .and_then(|rest| rest.split('/').next());
+            let details = zephium_webext_macos::AuthDetails {
+                request_id: "lab-1".into(),
+                url: url.into(),
+                scheme: "basic".into(),
+                host: host.unwrap_or_default().into(),
+                port: 443,
+                proxy: false,
+                tab: Some(this.active.get()),
+            };
+            this.runtime.auth_required(details, move |answer| {
+                match answer {
+                    Some(zephium_webext_macos::AuthAnswer::Credentials { username, .. }) => {
+                        println!("AUTH credentials for {username}")
+                    }
+                    Some(zephium_webext_macos::AuthAnswer::Cancel) => println!("AUTH cancel"),
+                    None => println!("AUTH none"),
+                }
+                next();
+            });
         } else if let Some(url) = step.get("tab").and_then(Value::as_str) {
             let id = this.open_tab(url, true);
             let view = this.tab_view(id).expect("tab exists");
@@ -331,8 +362,13 @@ impl Lab {
                 println!("EVAL SKIPPED: no view");
                 return next();
             };
+            let label = step
+                .get("as")
+                .and_then(Value::as_str)
+                .map(|label| format!("{label} "))
+                .unwrap_or_default();
             evaluate(this.mtm, &view, body, timeout, move |result| {
-                println!("RESULT {result}");
+                println!("RESULT {label}{result}");
                 next();
             });
         } else if step.get("action").is_some() {
@@ -348,11 +384,14 @@ impl Lab {
                     ticks.set(ticks.get() + 1);
                     waiting.page.borrow().is_some() || ticks.get() > 100
                 },
-                move || match lab.page.borrow().clone() {
-                    Some(view) => wait_loaded(view, next),
-                    None => {
-                        println!("NO POPUP");
-                        next()
+                move || {
+                    let view = lab.page.borrow().clone();
+                    match view {
+                        Some(view) => wait_loaded(view, next),
+                        None => {
+                            println!("NO POPUP");
+                            next()
+                        }
                     }
                 },
             );
@@ -394,6 +433,31 @@ impl Lab {
                 println!("ERASED");
                 after(1500, next);
             });
+        } else if let Some(name) = step.get("mark").and_then(Value::as_str) {
+            println!("MARK {name}");
+            next();
+        } else if let Some(what) = step.get("close").and_then(Value::as_str) {
+            match what {
+                "popup" => {
+                    let view = this.page.borrow_mut().take();
+                    if let Some(view) = view {
+                        view.removeFromSuperview();
+                    }
+                }
+                _ => {
+                    let first = this.tabs.borrow().first().map_or(0, |(id, _)| *id);
+                    this.tabs.borrow_mut().retain(|(id, view)| {
+                        if *id != first {
+                            load(view, "about:blank");
+                            view.removeFromSuperview();
+                        }
+                        *id == first
+                    });
+                    this.active.set(first);
+                    this.publish();
+                }
+            }
+            after(300, next);
         } else if let Some(ms) = step.get("sleep").and_then(Value::as_u64) {
             after(ms, next);
         } else {

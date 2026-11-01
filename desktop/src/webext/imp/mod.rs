@@ -17,6 +17,7 @@ use std::time::Duration;
 use zephium_app::{Handle, WebExtensionStatus};
 use zephium_core::ids::{ExtensionInstallId, ItemId, ProfileId};
 use zephium_core::ports::engine::WebExtensionLoad;
+use zephium_webext::limits::{self, Platform};
 use zephium_webext::manifest::Manifest;
 use zephium_webext::{archive, crx, permissions, ExtensionId};
 
@@ -61,7 +62,7 @@ impl Drop for Preparing {
     }
 }
 
-const MAX_PACKAGE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_PACKAGE_BYTES: u64 = 256 * 1024 * 1024;
 
 mod platform;
 use platform::{compat_revision, prepare_package};
@@ -170,7 +171,8 @@ impl WebExtensions {
                 zephium_webext::permissions::external_native_messaging_allowed(
                     &entry.reviewed_permissions,
                     entry.publisher_verified,
-                ),
+                ) || (entry.publisher_verified && entry.native_messaging_granted),
+            native_messaging_grantable: entry.publisher_verified,
             match_patterns: granted_sites(entry),
             start_background,
         }
@@ -632,6 +634,12 @@ pub(in crate::webext) async fn list(
                 .as_ref()
                 .map(permissions::warnings)
                 .unwrap_or_default();
+            let limitations = manifest
+                .as_ref()
+                .map(|manifest| {
+                    limits::limitations(manifest, &entry.reviewed_permissions, platform())
+                })
+                .unwrap_or_default();
             let has_options = manifest.as_ref().is_some_and(|manifest| {
                 let raw = manifest.raw();
                 raw.get("options_page").is_some()
@@ -657,6 +665,7 @@ pub(in crate::webext) async fn list(
                 state: state.to_owned(),
                 error,
                 warnings,
+                limitations,
                 access: access.to_owned(),
                 sites,
                 site_scoped: !entry.hosts.is_empty(),
@@ -666,6 +675,14 @@ pub(in crate::webext) async fn list(
             }
         })
         .collect())
+}
+
+fn platform() -> Platform {
+    if cfg!(target_os = "windows") {
+        Platform::Windows
+    } else {
+        Platform::Macos
+    }
 }
 
 fn extension_state(
@@ -898,6 +915,9 @@ pub(in crate::webext) fn answer_access(
             .iter_mut()
             .find(|entry| entry.id == request.extension_id)
         {
+            if request.permissions.iter().any(|p| p == "nativeMessaging") {
+                entry.native_messaging_granted = entry.publisher_verified;
+            }
             for permission in request.permissions {
                 if !entry.permissions.contains(&permission) {
                     entry.permissions.push(permission);
@@ -917,6 +937,41 @@ pub(in crate::webext) fn answer_access(
         allowed,
     });
     Ok(())
+}
+
+pub(in crate::webext) fn access_removed(
+    extensions: &WebExtensions,
+    removal: zephium_ipc::WebExtensionAccessRemovalView,
+) -> Result<(), String> {
+    let profile = ProfileId::parse(&removal.profile_id).ok_or("Invalid profile.")?;
+    let _publication = PUBLICATION
+        .lock()
+        .map_err(|_| "Extension state is unavailable.")?;
+    let mut registry = extensions.registry(profile);
+    let Some(entry) = registry
+        .extensions
+        .iter_mut()
+        .find(|entry| entry.id == removal.extension_id)
+    else {
+        return Ok(());
+    };
+    // Access the person accepted at install stays; only what was granted
+    // later can be given up.
+    let native = entry.native_messaging_granted
+        && removal.permissions.iter().any(|p| p == "nativeMessaging");
+    entry.native_messaging_granted &= !native;
+    let reviewed = |permission: &String| {
+        entry.reviewed_permissions.contains(permission) || permission == "nativeMessaging"
+    };
+    let before = (entry.permissions.len(), entry.hosts.len());
+    entry
+        .permissions
+        .retain(|permission| reviewed(permission) || !removal.permissions.contains(permission));
+    entry.hosts.retain(|host| !removal.patterns.contains(host));
+    if !native && before == (entry.permissions.len(), entry.hosts.len()) {
+        return Ok(());
+    }
+    extensions.save_existing(profile, &registry)
 }
 
 pub(in crate::webext) async fn uninstall(

@@ -192,6 +192,7 @@ impl WebextHost {
                 match_patterns: load.match_patterns,
             },
             external_native_messaging: load.external_native_messaging,
+            native_messaging_grantable: load.native_messaging_grantable,
             inspectable: true,
         };
         let install = load.install;
@@ -280,6 +281,7 @@ impl WebextHost {
                 match_patterns: load.match_patterns,
             },
             external_native_messaging: false,
+            native_messaging_grantable: false,
             inspectable: false,
         };
         entry.runtime.load(spec, move |_| {
@@ -296,6 +298,7 @@ impl WebextHost {
         &mut self,
         surface: &ExtensionBrowserSurface,
         view_for: impl Fn(ItemId) -> Option<Retained<WKWebView>>,
+        window_for: impl Fn(WindowId) -> Option<Retained<objc2_app_kit::NSWindow>>,
     ) {
         let Some(entry) = self.profiles.get_mut(&surface.profile()) else {
             return;
@@ -328,6 +331,20 @@ impl WebextHost {
             .focused()
             .map(|window| entry.bridge.ids.borrow_mut().window(window));
         entry.runtime.publish(&windows, focused);
+        for window in surface
+            .windows()
+            .iter()
+            .filter(|window| !window.is_private())
+        {
+            let id = entry.bridge.ids.borrow_mut().window(window.id());
+            entry
+                .runtime
+                .bind_window(id, window_for(window.id()).as_deref());
+            for tab in window.tabs() {
+                let id = entry.bridge.ids.borrow_mut().tab(tab.id());
+                entry.runtime.set_audio(id, tab.muted(), tab.audible());
+            }
+        }
         let open: std::collections::HashSet<ItemId> = surface.tabs().map(|tab| tab.id()).collect();
         settle_abandoned_auth_flows(surface.profile(), &open);
         // The engine's own views are the truth for residency; the shell's flag
@@ -358,6 +375,20 @@ impl WebextHost {
             .runtime
             .bind_views(views.iter().map(|(id, view)| (*id, view.as_deref())));
         entry.surface = Some(surface.clone());
+    }
+
+    /// Offers a site's sign-in challenge to the profile's extensions; `done`
+    /// gets their answer, or `None` when the person should be asked.
+    pub(crate) fn auth_required(
+        &self,
+        profile: ProfileId,
+        details: zephium_webext_macos::AuthDetails,
+        done: Box<dyn FnOnce(Option<zephium_webext_macos::AuthAnswer>)>,
+    ) {
+        match self.profiles.get(&profile) {
+            Some(entry) => entry.runtime.auth_required(details, done),
+            None => done(None),
+        }
     }
 
     pub(crate) fn bind_view(&mut self, profile: ProfileId, tab: ItemId, view: Option<&WKWebView>) {
@@ -459,6 +490,65 @@ impl WebextHost {
         }
     }
 
+    /// Runs the extension command `event` is the shortcut of, in the profile
+    /// of the focused window, as Chrome does before the page sees the key.
+    /// The browser's own menu shortcuts keep precedence. `_execute_action`
+    /// goes through the toolbar so its popup hangs from the button.
+    pub(crate) fn perform_command(&self, event: &objc2_app_kit::NSEvent) -> bool {
+        let Some((profile, entry, surface)) = self.profiles.iter().find_map(|(profile, entry)| {
+            let surface = entry.surface.as_ref().filter(|s| s.focused().is_some())?;
+            Some((*profile, entry, surface))
+        }) else {
+            return false;
+        };
+        let mut found: Option<(ExtensionInstallId, _, _, _)> = None;
+        for (install_id, install) in &entry.installs {
+            if !install.loaded || found.as_ref().is_some_and(|(id, ..)| id < install_id) {
+                continue;
+            }
+            let Some(context) = entry.runtime.context(&install.extension_id) else {
+                continue;
+            };
+            if let Some(command) = unsafe { context.commandForEvent(event) } {
+                found = Some((*install_id, install.generation, context, command));
+            }
+        }
+        let Some((install, generation, context, command)) = found else {
+            return false;
+        };
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        if objc2_app_kit::NSApplication::sharedApplication(mtm)
+            .mainMenu()
+            .is_some_and(|menu| menu_claims(&menu, event))
+        {
+            return false;
+        }
+        if event.isARepeat() {
+            return true;
+        }
+        let identifier = unsafe { command.identifier() }.to_string();
+        if matches!(
+            identifier.as_str(),
+            "_execute_action" | "_execute_browser_action" | "_execute_page_action"
+        ) {
+            if let Some(tab) = shortcut_tab(surface.windows(), surface.focused()) {
+                entry
+                    .bridge
+                    .sink
+                    .emit(EngineEvent::ExtensionActionShortcutRequested {
+                        runtime: ExtensionRuntimeInstance::new(profile, install, generation),
+                        tab,
+                        surface_generation: surface.generation(),
+                    });
+            }
+        } else {
+            unsafe { context.performCommand(&command) };
+        }
+        true
+    }
+
     /// Runs a toolbar action. A popup is presented from WebKit's delegate
     /// callback, anchored to the button the user clicked.
     pub(crate) fn invoke(
@@ -483,6 +573,22 @@ impl WebextHost {
             return ExtensionActionSettlement::Rejected(
                 ExtensionActionRejection::RuntimeUnavailable,
             );
+        }
+        if request.is_menu() {
+            let tab_object = entry.runtime.tab_object(tab);
+            let Some(action) = entry
+                .runtime
+                .context(&extension_id)
+                .and_then(|context| unsafe { context.actionForTab(tab_object.as_deref()) })
+            else {
+                return ExtensionActionSettlement::Rejected(
+                    ExtensionActionRejection::ActionUnavailable,
+                );
+            };
+            if let Some(parent) = parent {
+                present_action_menu(&action, parent, request.anchor().rect());
+            }
+            return ExtensionActionSettlement::Dispatched;
         }
         *entry.bridge.popup.borrow_mut() = parent.map(|parent| (parent, request.anchor().rect()));
         // WebKit drops what a popup sends while the worker sleeps, and the
@@ -658,6 +764,105 @@ impl WebextHost {
     }
 }
 
+/// The tab a toolbar shortcut acts on: the focused window's active one.
+/// Private windows run no extensions, as the snapshot WebKit gets leaves them
+/// out, so a shortcut pressed there does nothing.
+fn shortcut_tab(
+    windows: &[zephium_core::extensions::ExtensionBrowserWindow],
+    focused: Option<WindowId>,
+) -> Option<ItemId> {
+    windows
+        .iter()
+        .find(|window| Some(window.id()) == focused && !window.is_private())
+        .and_then(|window| window.active())
+}
+
+/// Chrome's `contextMenus.ACTION_MENU_TOP_LEVEL_LIMIT`.
+const ACTION_MENU_TOP_LEVEL_LIMIT: usize = 6;
+
+/// Pops up an action's `contexts: ["action"]` items under its button. WebKit's
+/// items run `contextMenus.onClicked` and grant activeTab themselves. The menu
+/// tracks in a run loop of its own, so it opens after the host is released.
+fn present_action_menu(action: &WKWebExtensionAction, parent: Retained<NSView>, anchor: Rect) {
+    let items: Vec<_> = unsafe { action.menuItems() }
+        .iter()
+        .take(ACTION_MENU_TOP_LEVEL_LIMIT)
+        .collect();
+    if items.is_empty() {
+        return;
+    }
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let bound = dispatch2::MainThreadBound::new((items, parent), mtm);
+    dispatch2::DispatchQueue::main().exec_async(move || {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let (items, parent) = bound.into_inner(mtm);
+        let menu = objc2_app_kit::NSMenu::new(mtm);
+        menu.setAutoenablesItems(false);
+        for item in &items {
+            if unsafe { item.menu() }.is_none() {
+                menu.addItem(item);
+            }
+        }
+        let y = if parent.isFlipped() {
+            anchor.y + anchor.height
+        } else {
+            parent.bounds().size.height - anchor.y - anchor.height
+        };
+        menu.popUpMenuPositioningItem_atLocation_inView(
+            None,
+            NSPoint::new(anchor.x, y),
+            Some(&parent),
+        );
+    });
+}
+
+/// Whether a key equivalent in `menu` or its submenus takes `event`.
+fn menu_claims(menu: &objc2_app_kit::NSMenu, event: &objc2_app_kit::NSEvent) -> bool {
+    use objc2_app_kit::NSEventModifierFlags as Flags;
+    let relevant = Flags::Command | Flags::Control | Flags::Option | Flags::Shift;
+    let flags = event.modifierFlags() & relevant;
+    let Some(key) = event
+        .charactersByApplyingModifiers(Flags::empty())
+        .map(|key| key.to_string().to_lowercase())
+    else {
+        return false;
+    };
+    fn walk(menu: &objc2_app_kit::NSMenu, key: &str, flags: Flags) -> bool {
+        menu.itemArray().iter().any(|item| {
+            item.submenu().is_some_and(|sub| walk(&sub, key, flags))
+                || key_equivalent_matches(
+                    &item.keyEquivalent().to_string(),
+                    item.keyEquivalentModifierMask(),
+                    key,
+                    flags,
+                )
+        })
+    }
+    walk(menu, &key, flags)
+}
+
+/// AppKit spells Shift in a key equivalent as an uppercase letter.
+fn key_equivalent_matches(
+    equivalent: &str,
+    mask: objc2_app_kit::NSEventModifierFlags,
+    key: &str,
+    flags: objc2_app_kit::NSEventModifierFlags,
+) -> bool {
+    use objc2_app_kit::NSEventModifierFlags as Flags;
+    if equivalent.is_empty() {
+        return false;
+    }
+    let mut mask = mask & (Flags::Command | Flags::Control | Flags::Option | Flags::Shift);
+    if equivalent.chars().any(char::is_uppercase) {
+        mask |= Flags::Shift;
+    }
+    mask == flags && equivalent.to_lowercase() == key
+}
+
 fn presentation_revision(label: &str, badge: &str, icon: Option<&[u8]>) -> ExtensionActionRevision {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -667,6 +872,38 @@ fn presentation_revision(label: &str, badge: &str, icon: Option<&[u8]>) -> Exten
 
 /// Chrome shows a multi-line title as a tooltip; a button's name is its first
 /// line (Google Translate's title goes on to explain its clicks).
+/// An API-gap error's wording without addresses or quoted text, which may
+/// carry page content.
+fn redact(text: &str) -> String {
+    let mut out = String::with_capacity(text.len().min(300));
+    let mut quote: Option<char> = None;
+    for word in text.split(' ') {
+        if !out.is_empty() && quote.is_none() {
+            out.push(' ');
+        }
+        if quote.is_none() && word.contains("://") {
+            out.push_str("<address>");
+            continue;
+        }
+        for c in word.chars() {
+            match quote {
+                Some(open) if c == open => {
+                    quote = None;
+                    out.push('\u{2026}');
+                    out.push(c);
+                }
+                Some(_) => {}
+                None if matches!(c, '"' | '`') => {
+                    quote = Some(c);
+                    out.push(c);
+                }
+                None => out.push(c),
+            }
+        }
+    }
+    out.chars().take(300).collect()
+}
+
 fn first_line(text: &str) -> String {
     let line = text
         .lines()
@@ -1156,6 +1393,22 @@ impl Bridge {
 }
 
 impl Host for Bridge {
+    fn password_filling_changed(&self, enabled: bool) {
+        crate::platform::macos::autofill::set_filling(self.profile, enabled);
+    }
+
+    fn access_removed(&self, extension: &str, permissions: &[String], patterns: &[String]) {
+        self.sink
+            .emit(EngineEvent::WebExtensionAccessRemoved(Box::new(
+                zephium_core::ports::engine::WebExtensionAccessRemoval {
+                    profile: self.profile,
+                    extension_id: extension.to_owned(),
+                    permissions: permissions.to_vec(),
+                    patterns: patterns.to_vec(),
+                },
+            )));
+    }
+
     fn prompt_access(
         &self,
         request: zephium_webext_macos::AccessRequest,
@@ -1175,6 +1428,12 @@ impl Host for Bridge {
                     patterns: request.patterns,
                 },
             )));
+    }
+
+    fn action_changed(&self, _extension: &str) {
+        self.sink.emit(EngineEvent::ExtensionActionsInvalidated {
+            profile: self.profile,
+        });
     }
 
     fn log(&self, extension: &str, level: LogLevel, message: &str) {
@@ -1212,6 +1471,8 @@ impl Host for Bridge {
         // The local log a person may attach to a report keeps only its size.
         if cfg!(debug_assertions) {
             eprintln!("extension {extension} {tag}: {message}{suffix}");
+        } else if let Some(gap) = message.strip_prefix("[gap] ") {
+            eprintln!("extension {extension} {tag}: gap {}{suffix}", redact(gap));
         } else {
             let length = message.chars().count();
             eprintln!("extension {extension} {tag}: {length} characters{suffix}");
@@ -1279,6 +1540,44 @@ impl Host for Bridge {
                 Some(tab) => ExtensionBrowserRequestAction::GoForward { tab },
                 None => return done(Err("No tab with that id.".into())),
             },
+            TabRequest::Duplicate { tab: id } => match tab(id) {
+                Some(tab) => ExtensionBrowserRequestAction::DuplicateTab { tab },
+                None => return done(Err("No tab with that id.".into())),
+            },
+            TabRequest::Mute { tab: id, muted } => match tab(id) {
+                Some(tab) => ExtensionBrowserRequestAction::SetTabMuted { tab, muted },
+                None => return done(Err("No tab with that id.".into())),
+            },
+            TabRequest::Zoom { tab: id, factor } => {
+                let percent = factor.map(|factor| (factor * 100.0).round());
+                if percent.is_some_and(|percent| {
+                    !(f64::from(zephium_core::zoom::MIN_PERCENT)
+                        ..=f64::from(zephium_core::zoom::MAX_PERCENT))
+                        .contains(&percent)
+                }) {
+                    return done(Err(format!(
+                        "Zoom factor must be between {} and {}.",
+                        zephium_core::zoom::scale(zephium_core::zoom::MIN_PERCENT),
+                        zephium_core::zoom::scale(zephium_core::zoom::MAX_PERCENT)
+                    )));
+                }
+                match tab(id) {
+                    Some(tab) => ExtensionBrowserRequestAction::SetTabZoom {
+                        tab,
+                        percent: percent.map(|percent| percent as u16),
+                    },
+                    None => return done(Err("No tab with that id.".into())),
+                }
+            }
+            TabRequest::Move { tabs, before } => {
+                let moved: Option<Box<[ItemId]>> = tabs.iter().map(|id| tab(*id)).collect();
+                match (moved, before.map(|id| tab(id).ok_or(())).transpose()) {
+                    (Some(tabs), Ok(before)) => {
+                        ExtensionBrowserRequestAction::MoveTabs { tabs, before }
+                    }
+                    _ => return done(Err("No tab with that id.".into())),
+                }
+            }
             TabRequest::Pin { .. } | TabRequest::FocusWindow { .. } => {
                 return done(Ok(None));
             }
@@ -1625,6 +1924,32 @@ impl PageDelegate {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_action_shortcut_acts_on_the_focused_window_unless_it_is_private() {
+        use zephium_core::extensions::{ExtensionBrowserTab, ExtensionBrowserWindow};
+        let window = |id: WindowId, private: bool, tab: u128| {
+            let item = ItemId::from(tab);
+            let tab = ExtensionBrowserTab::from_snapshot(
+                None,
+                item,
+                true,
+                "Example",
+                Some(&url::Url::parse("https://example.test/").unwrap()),
+                false,
+                false,
+            )
+            .unwrap();
+            ExtensionBrowserWindow::new(id, private, Some(item), vec![tab]).unwrap()
+        };
+        let windows = [window(1, false, 10), window(2, true, 20)];
+        assert_eq!(
+            super::shortcut_tab(&windows, Some(1)),
+            Some(ItemId::from(10))
+        );
+        assert_eq!(super::shortcut_tab(&windows, Some(2)), None);
+        assert_eq!(super::shortcut_tab(&windows, None), None);
+    }
+
     use super::*;
 
     const AUTH_EXTENSION: &str = "abcdefghijklmnopabcdefghijklmnop";
@@ -2037,6 +2362,40 @@ mod tests {
         assert_eq!(results.borrow().len(), 1);
         assert_eq!(registry.pending.len(), 1);
         assert_eq!(registry.pending[0].tab.get(), Some(ItemId::from(200)));
+    }
+
+    #[test]
+    fn a_menu_key_equivalent_claims_exactly_its_keys() {
+        use objc2_app_kit::NSEventModifierFlags as Flags;
+        let cmd = Flags::Command;
+        let cmd_shift = Flags::Command | Flags::Shift;
+        assert!(key_equivalent_matches("t", cmd, "t", cmd));
+        assert!(key_equivalent_matches("T", cmd, "t", cmd_shift));
+        assert!(key_equivalent_matches("t", cmd_shift, "t", cmd_shift));
+        assert!(key_equivalent_matches(
+            "t",
+            cmd | Flags::NumericPad,
+            "t",
+            cmd
+        ));
+        assert!(!key_equivalent_matches("t", cmd, "t", cmd_shift));
+        assert!(!key_equivalent_matches("T", cmd, "t", cmd));
+        assert!(!key_equivalent_matches("y", cmd, "t", cmd));
+        assert!(!key_equivalent_matches("", cmd, "", cmd));
+    }
+
+    #[test]
+    fn gap_errors_keep_their_wording_but_not_addresses_or_quoted_text() {
+        assert_eq!(
+            super::redact(
+                "TypeError: chrome.idle.queryState is not a function @ chrome-extension://abc/w.js:1:2"
+            ),
+            "TypeError: chrome.idle.queryState is not a function @ <address>"
+        );
+        assert_eq!(
+            super::redact("Invalid call to x(\"secret token\") for `me@example.com`"),
+            "Invalid call to x(\"\u{2026}\") for `\u{2026}`"
+        );
     }
 
     #[test]

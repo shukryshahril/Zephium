@@ -23,6 +23,14 @@
     void extensions.invoke(profileId, tabId, action, anchor(target));
   }
 
+  function openMenu(event: MouseEvent, action: (typeof actions)[number]) {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.currentTarget;
+    if (profileId === null || !(target instanceof HTMLElement)) return;
+    extensions.menu(profileId, action, target.getBoundingClientRect());
+  }
+
   $effect(() => {
     const request = shortcut;
     const root = actionRoot;
@@ -66,6 +74,7 @@
       data-extension-install={action.runtime.install_id}
       class="tile"
       onclick={(event) => invoke(event, action)}
+      oncontextmenu={(event) => openMenu(event, action)}
     >
       <span class="glyph">
         <ExtensionActionIcon rgba={action.icon_rgba_base64} />

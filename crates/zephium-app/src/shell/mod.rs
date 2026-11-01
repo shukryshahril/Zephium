@@ -1279,6 +1279,7 @@ impl Shell {
             }
             Command::OpenExternal(urls) => self.open_external(urls),
             Command::Find(request) => self.find_in_page(request),
+            Command::ShowStoreButton { tab, button } => self.show_store_button(tab, button),
             Command::SetAppSetting { key, value } => {
                 let _ = self.operation_set_app_setting(key, value);
             }
@@ -1408,7 +1409,7 @@ impl Shell {
                         "extensions: maintenance could not reconcile browser metadata"
                     );
                 }
-                let extension_actions = self.maintain_extension_actions();
+                let extension_actions = self.retry_extension_actions();
                 if extension_actions.rejected {
                     crate::diagnostic!("extensions: maintenance could not refresh toolbar actions");
                 }

@@ -853,6 +853,12 @@ impl Engine for FakeEngine {
         }
         self.native_admission()
     }
+    fn show_store_button(&self, id: ItemId, button: zephium_core::ports::engine::StoreButton) {
+        self.log(format!(
+            "store-button {id} {} {:?}",
+            button.extension, button.state
+        ));
+    }
     fn capture(&self, _id: ItemId) -> NativeDispatch {
         NativeDispatch::Unsupported
     }
@@ -1978,6 +1984,8 @@ fn apply_projection(view: &mut ItemsState, p: Projection) {
         Projection::ExtensionActionShortcut(_) => {}
         Projection::PagePermissionPrompt(_) => {}
         Projection::WebExtensionAccessRequest(_) => {}
+        Projection::WebExtensionAccessRemoved(_) => {}
+        Projection::WebExtensionStoreClick(_) => {}
         Projection::Favicons(_) => {}
         Projection::PanelOwner(_) => {}
         Projection::UiCommand(_) => {}
